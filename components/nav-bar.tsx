@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Camera, MapPin, Menu, X, LogOut } from 'lucide-react'
+import { Home, Camera, MapPin, ClipboardCheck, Menu, X, LogOut } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from './ui/button'
 import { cn } from '@/lib/utils'
@@ -19,6 +19,7 @@ export function NavBar() {
     { href: '/', label: 'Home', icon: Home },
     { href: '/quick-add', label: 'Quick Add', icon: Camera },
     { href: '/locations', label: 'Locations', icon: MapPin },
+    { href: '/inventering', label: 'Inventering', icon: ClipboardCheck },
   ]
 
   const handleSignOut = async () => {
