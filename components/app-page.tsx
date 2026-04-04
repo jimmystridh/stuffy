@@ -9,20 +9,17 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Search, SortAsc, SortDesc, Grid, List, Plus, Camera, Sparkles } from 'lucide-react'
+import { Search, SortAsc, SortDesc, Grid, List, Plus, Camera, Sparkles, Type, Zap } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { VirtualizedItemCollection } from '@/components/virtualized-item-collection'
 import { getAllTags, getItems } from '@/app/actions/items'
 import { getLocations } from '@/app/actions/locations'
-import type { Item, Location } from '@/lib/types'
+import type { Item, Location, SearchMode } from '@/lib/types'
 
 const ITEM_BATCH_SIZE = 36
 
 function parseRestoreIndex(value: string | null) {
-  if (value === null) {
-    return -1
-  }
-
+  if (value === null) return -1
   const parsedValue = Number.parseInt(value, 10)
   return Number.isNaN(parsedValue) ? -1 : parsedValue
 }
@@ -74,15 +71,19 @@ function mergePageIntoCache(
 ) {
   const nextItems = Array.from({ length: totalItems }, (_, index) => currentItems[index])
   const startIndex = (page - 1) * ITEM_BATCH_SIZE
-
   pageItems.forEach((item, offset) => {
     const targetIndex = startIndex + offset
     if (targetIndex < totalItems) {
       nextItems[targetIndex] = item
     }
   })
-
   return nextItems
+}
+
+const SEARCH_MODE_CONFIG: Record<SearchMode, { icon: typeof Search; label: string; placeholder: string }> = {
+  auto: { icon: Zap, label: 'Auto', placeholder: 'Search items (text + AI)...' },
+  text: { icon: Type, label: 'Text', placeholder: 'Search by name, tags, notes...' },
+  ai: { icon: Sparkles, label: 'AI', placeholder: 'Describe what you\'re looking for...' },
 }
 
 export function Page() {
@@ -101,7 +102,7 @@ export function Page() {
   const [isFiltersLoading, setIsFiltersLoading] = useState(true)
 
   const searchTerm = searchParams.get('q') || ''
-  const semanticQuery = searchParams.get('semanticQ') || ''
+  const searchMode = (searchParams.get('mode') as SearchMode) || 'auto'
   const selectedTagsParam = searchParams.get('tags') || ''
   const selectedLocation = searchParams.get('location') || 'All'
   const selectedTags = selectedTagsParam ? selectedTagsParam.split(',').filter(Boolean) : []
@@ -109,11 +110,12 @@ export function Page() {
   const sortOrder = (searchParams.get('order') || 'asc') as 'asc' | 'desc'
   const viewMode = (searchParams.get('view') || 'card') as 'card' | 'list'
   const restoreIndex = parseRestoreIndex(searchParams.get('index'))
-  const [semanticInput, setSemanticInput] = useState(semanticQuery)
+  const [searchInput, setSearchInput] = useState(searchTerm)
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const filterSignature = [
     searchTerm,
-    semanticQuery,
+    searchMode,
     selectedTagsParam,
     selectedLocation,
     sortBy,
@@ -123,55 +125,32 @@ export function Page() {
   const loadedItemsCount = itemsByIndex.reduce((count, item) => count + (item ? 1 : 0), 0)
 
   useEffect(() => {
-    setSemanticInput(semanticQuery)
-  }, [semanticQuery])
+    setSearchInput(searchTerm)
+  }, [searchTerm])
 
   useEffect(() => {
     let cancelled = false
-
     const loadFilters = async () => {
       try {
-        const [tags, locationsResult] = await Promise.all([
-          getAllTags(),
-          getLocations(),
-        ])
-
-        if (cancelled) {
-          return
-        }
-
+        const [tags, locationsResult] = await Promise.all([getAllTags(), getLocations()])
+        if (cancelled) return
         setAllTags(tags)
-        if (locationsResult.locations) {
-          setLocations(locationsResult.locations)
-        }
+        if (locationsResult.locations) setLocations(locationsResult.locations)
       } catch {
         console.error('Failed to load filters')
       } finally {
-        if (!cancelled) {
-          setIsFiltersLoading(false)
-        }
+        if (!cancelled) setIsFiltersLoading(false)
       }
     }
-
     void loadFilters()
-
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [])
 
   const loadPage = async (page: number) => {
-    if (page < 1) {
-      return
-    }
-
+    if (page < 1) return
     const requestVersion = requestVersionRef.current
-    if (loadedPagesRef.current.has(page) || loadingPagesRef.current.has(page)) {
-      return
-    }
-
+    if (loadedPagesRef.current.has(page) || loadingPagesRef.current.has(page)) return
     loadingPagesRef.current.add(page)
-
     try {
       const itemsResult = await getItems({
         page,
@@ -179,14 +158,10 @@ export function Page() {
         orderBy: { field: sortBy, direction: sortOrder },
         tags: selectedTags,
         search: searchTerm,
+        searchMode,
         location: selectedLocation,
-        semanticQuery,
       })
-
-      if (requestVersionRef.current !== requestVersion || itemsResult.error) {
-        return
-      }
-
+      if (requestVersionRef.current !== requestVersion || itemsResult.error) return
       loadedPagesRef.current.add(page)
       setTotalItems(itemsResult.totalItems)
       setItemsByIndex((currentItems) =>
@@ -203,10 +178,7 @@ export function Page() {
   }
 
   const loadPagesForRange = (startIndex: number, endIndex: number) => {
-    if (totalItems === 0) {
-      return
-    }
-
+    if (totalItems === 0) return
     const lastIndex = Math.max(0, totalItems - 1)
     const clampedStart = Math.max(0, startIndex)
     const clampedEnd = Math.min(lastIndex, endIndex)
@@ -215,7 +187,6 @@ export function Page() {
     const endPage = Math.max(startPage, Math.floor(clampedEnd / ITEM_BATCH_SIZE) + 1)
     const preloadStart = Math.max(1, startPage - 1)
     const preloadEnd = Math.min(maxPage, endPage + 1)
-
     for (let page = preloadStart; page <= preloadEnd; page += 1) {
       void loadPage(page)
     }
@@ -232,19 +203,12 @@ export function Page() {
     setItemsByIndex([])
     setTotalItems(0)
     setIsLoading(true)
-
     if (restoreIndex < 0) {
       window.scrollTo({ top: 0, behavior: 'auto' })
     }
-
     const initialPage = Math.max(1, Math.floor(Math.max(restoreIndex, 0) / ITEM_BATCH_SIZE) + 1)
-    const timeoutId = window.setTimeout(() => {
-      loadInitialPage(initialPage)
-    }, 100)
-
-    return () => {
-      window.clearTimeout(timeoutId)
-    }
+    const timeoutId = window.setTimeout(() => { loadInitialPage(initialPage) }, 100)
+    return () => { window.clearTimeout(timeoutId) }
   }, [filterSignature, restoreIndex])
 
   const updateUrlParams = (
@@ -252,49 +216,48 @@ export function Page() {
     options?: { preserveIndex?: boolean }
   ) => {
     const params = new URLSearchParams(searchParams.toString())
-
     params.delete('page')
-
     if (!options?.preserveIndex && !Object.prototype.hasOwnProperty.call(updates, 'index')) {
       params.delete('index')
     }
-
     Object.entries(updates).forEach(([key, value]) => {
-      if (value === null) {
-        params.delete(key)
-      } else {
-        params.set(key, value)
-      }
+      if (value === null) params.delete(key)
+      else params.set(key, value)
     })
-
     const query = params.toString()
+    startTransition(() => { router.push(query ? `${pathname}?${query}` : pathname) })
+  }
 
-    startTransition(() => {
-      router.push(query ? `${pathname}?${query}` : pathname)
-    })
+  const handleSearchInput = (value: string) => {
+    setSearchInput(value)
+    // Debounce: for text/auto mode update URL on each keystroke (debounced),
+    // for AI mode wait for Enter since it's expensive
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    if (searchMode === 'ai') return // AI mode requires explicit submit
+    searchTimerRef.current = setTimeout(() => {
+      updateUrlParams({ q: value || null })
+    }, 300)
+  }
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    updateUrlParams({ q: searchInput || null })
+  }
+
+  const cycleSearchMode = () => {
+    const modes: SearchMode[] = ['auto', 'text', 'ai']
+    const nextMode = modes[(modes.indexOf(searchMode) + 1) % modes.length]
+    updateUrlParams({ mode: nextMode === 'auto' ? null : nextMode })
   }
 
   const toggleTag = (tag: string) => {
     const newTags = selectedTags.includes(tag) ? [] : [tag]
-    updateUrlParams({
-      tags: newTags.length > 0 ? newTags.join(',') : null,
-    })
+    updateUrlParams({ tags: newTags.length > 0 ? newTags.join(',') : null })
   }
 
   const handleViewModeChange = () => {
     updateUrlParams({ view: viewMode === 'card' ? 'list' : 'card' }, { preserveIndex: true })
-  }
-
-  const handleSemanticSearch = (event: React.FormEvent) => {
-    event.preventDefault()
-    updateUrlParams({
-      semanticQ: semanticInput.trim() || null,
-    })
-  }
-
-  const clearSemanticSearch = () => {
-    setSemanticInput('')
-    updateUrlParams({ semanticQ: null })
   }
 
   const handleItemClick = (id: string, index: number) => {
@@ -303,6 +266,9 @@ export function Page() {
     currentFilters.delete('page')
     router.push(`/item/${id}?${currentFilters.toString()}`)
   }
+
+  const modeConfig = SEARCH_MODE_CONFIG[searchMode]
+  const ModeIcon = modeConfig.icon
 
   return (
     <div className="min-h-screen">
@@ -334,52 +300,46 @@ export function Page() {
           </div>
         </header>
 
-        <div className="mb-6 rounded-2xl border bg-background/80 p-4">
-          <form onSubmit={handleSemanticSearch} className="flex flex-col gap-3 md:flex-row md:items-center">
-            <div className="flex-1">
-              <Label htmlFor="semantic-search" className="mb-2 inline-flex items-center gap-2">
-                <Sparkles className="h-4 w-4" />
-                AI Search
-              </Label>
-              <Input
-                id="semantic-search"
-                type="text"
-                placeholder="Describe the item you want to find from its images..."
-                value={semanticInput}
-                onChange={(event) => setSemanticInput(event.target.value)}
-              />
-            </div>
-            <div className="flex gap-2 md:self-end">
-              <Button type="submit" className="gap-2">
-                <Sparkles className="h-4 w-4" />
-                Search Images
-              </Button>
-              {semanticQuery && (
-                <Button type="button" variant="outline" onClick={clearSemanticSearch}>
-                  Clear
-                </Button>
-              )}
-            </div>
-          </form>
-          {semanticQuery && (
-            <p className="mt-3 text-sm text-muted-foreground">
-              AI-ranked results for &quot;{semanticQuery}&quot; using stored image embeddings.
-            </p>
-          )}
-        </div>
-
         <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-4">
           <div className="md:col-span-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 transform text-gray-400" />
+            <form onSubmit={handleSearchSubmit} className="relative flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={cycleSearchMode}
+                className="absolute left-1 top-1/2 -translate-y-1/2 h-8 w-8 z-10"
+                title={`Search mode: ${modeConfig.label}. Click to cycle.`}
+              >
+                <ModeIcon className="h-4 w-4" />
+              </Button>
               <Input
                 type="text"
-                placeholder="Search items..."
-                value={searchTerm}
-                onChange={(event) => updateUrlParams({ q: event.target.value || null })}
-                className="pl-10 transition-colors duration-200"
+                placeholder={modeConfig.placeholder}
+                value={searchInput}
+                onChange={(e) => handleSearchInput(e.target.value)}
+                className="pl-10 pr-4 transition-colors duration-200"
               />
-            </div>
+              {searchMode === 'ai' && (
+                <Button type="submit" size="sm" className="gap-1">
+                  <Sparkles className="h-3 w-3" />
+                  Search
+                </Button>
+              )}
+            </form>
+            {searchTerm && (
+              <div className="mt-1 flex items-center gap-2">
+                <Badge variant="secondary" className="text-xs gap-1">
+                  <ModeIcon className="h-3 w-3" />
+                  {modeConfig.label}
+                </Badge>
+                {searchMode === 'auto' && (
+                  <span className="text-xs text-muted-foreground">
+                    Combining text + AI results
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex space-x-2">
             <div className="flex items-center gap-2">
@@ -471,7 +431,7 @@ export function Page() {
               <Card>
                 <CardContent className="p-6 text-sm text-muted-foreground">
                   No items matched the current filters.
-                  {semanticQuery ? ' Try adjusting the AI search description or refresh AI indexing on older items.' : ''}
+                  {searchMode === 'ai' ? ' Try a different description or switch to text search.' : ''}
                 </CardContent>
               </Card>
             ) : (

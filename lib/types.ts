@@ -66,6 +66,8 @@ export interface Item {
   ai: ItemAiData | null
 }
 
+export type SearchMode = 'auto' | 'text' | 'ai'
+
 export interface GetItemsParams {
   page?: number
   pageSize?: number
@@ -75,8 +77,8 @@ export interface GetItemsParams {
   }
   tags?: string[]
   search?: string
+  searchMode?: SearchMode
   location?: string
-  semanticQuery?: string
 }
 
 export interface GetItemsResponse {

@@ -81,7 +81,7 @@ export function Page({ params }: { params: { id: string } }) {
 
         const filterParams = {
           search: searchParams.get('q') || '',
-          semanticQuery: searchParams.get('semanticQ') || '',
+          searchMode: (searchParams.get('mode') as 'auto' | 'text' | 'ai') || 'auto',
           location: searchParams.get('location') || '',
           tags: searchParams.get('tags')?.split(',').filter(Boolean) || [],
           orderBy: {

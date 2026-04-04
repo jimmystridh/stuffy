@@ -199,16 +199,39 @@ export async function updateItem(id: string, formData: FormData) {
   }
 }
 
+function textFilter(items: Item[], search: string): Item[] {
+  const searchLower = search.toLowerCase()
+  return items.filter(item =>
+    [
+      item.name,
+      item.itemId,
+      item.notes || '',
+      item.tags.join(' '),
+      item.ai?.searchText || '',
+    ].some(value => value.toLowerCase().includes(searchLower))
+  )
+}
+
+async function semanticRank(items: Item[], query: string): Promise<Item[]> {
+  const queryEmbedding = await generateSemanticQueryEmbedding(query)
+  return items
+    .map(item => {
+      const vector = item.ai?.imageEmbedding?.vector
+      if (!vector?.length) return null
+      return { item, score: cosineSimilarity(queryEmbedding, vector) }
+    })
+    .filter((entry): entry is { item: Item; score: number } => entry !== null)
+    .sort((left, right) => right.score - left.score)
+    .map(entry => entry.item)
+}
+
 async function getFilteredItems({
   orderBy = { field: 'name', direction: 'asc' },
   tags = [],
   search = '',
+  searchMode = 'auto',
   location = '',
-  semanticQuery = '',
 }: GetItemsParams = {}): Promise<Item[]> {
-  // Firestore doesn't support LIKE queries, so we fetch and filter in memory.
-  // For a personal inventory app with a few hundred items this keeps the
-  // query logic simple while still staying fast enough in practice.
   let query = itemsCol().where('deleted', '==', false) as FirebaseFirestore.Query
 
   if (location && location !== 'All') {
@@ -223,38 +246,35 @@ async function getFilteredItems({
   let items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Item)
 
   if (search) {
-    const searchLower = search.toLowerCase()
-    items = items.filter(item =>
-      [
-        item.name,
-        item.notes || '',
-        item.tags.join(' '),
-        item.ai?.searchText || '',
-      ].some(value => value.toLowerCase().includes(searchLower))
-    )
+    if (searchMode === 'text') {
+      items = textFilter(items, search)
+    } else if (searchMode === 'ai') {
+      try {
+        items = await semanticRank(items, search)
+      } catch (error) {
+        console.error('Semantic search failed, falling back to text:', error)
+        items = textFilter(items, search)
+      }
+    } else {
+      // Auto mode: run text filter first, then try semantic ranking on the
+      // full set. Merge by showing semantic matches first, then text-only
+      // matches that weren't in the semantic results.
+      const textMatches = textFilter(items, search)
+      try {
+        const semanticMatches = await semanticRank(items, search)
+        const semanticIds = new Set(semanticMatches.map(i => i.id))
+        const textOnlyMatches = textMatches.filter(i => !semanticIds.has(i.id))
+        items = [...semanticMatches, ...textOnlyMatches]
+      } catch {
+        // Semantic failed, just use text results
+        items = textMatches
+      }
+    }
   }
 
-  if (semanticQuery) {
-    try {
-      const queryEmbedding = await generateSemanticQueryEmbedding(semanticQuery)
-      items = items
-        .map(item => {
-          const vector = item.ai?.imageEmbedding?.vector
-          if (!vector?.length) return null
-          return {
-            item,
-            score: cosineSimilarity(queryEmbedding, vector),
-          }
-        })
-        .filter((entry): entry is { item: Item; score: number } => entry !== null)
-        .sort((left, right) => right.score - left.score)
-        .map(entry => entry.item)
-    } catch (error) {
-      console.error('Failed semantic item search:', error)
-    }
-  } else {
+  // Only apply sort order when there's no search (search results are ranked by relevance)
+  if (!search) {
     const field = orderBy.field as keyof Item
-
     items.sort((a, b) => {
       const aVal = (a[field] || '') as string
       const bVal = (b[field] || '') as string
@@ -275,16 +295,16 @@ export async function getItems({
   orderBy = { field: 'name', direction: 'asc' },
   tags = [],
   search = '',
+  searchMode = 'auto',
   location = '',
-  semanticQuery = '',
 }: GetItemsParams = {}): Promise<GetItemsResponse> {
   try {
     const items = await getFilteredItems({
       orderBy,
       tags,
       search,
+      searchMode,
       location,
-      semanticQuery,
     })
 
     const normalizedPage = Math.max(1, page)
