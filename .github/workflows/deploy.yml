@@ -65,6 +65,7 @@ jobs:
             --set-env-vars "GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}" \
             --set-env-vars "ALLOWED_EMAILS=${{ secrets.ALLOWED_EMAILS }}" \
             --set-env-vars "NODE_ENV=production" \
+            --set-env-vars "MCP_AUTH_SECRET=${{ secrets.MCP_AUTH_SECRET }}" \
             --memory 512Mi \
             --cpu 1 \
             --min-instances 0 \
