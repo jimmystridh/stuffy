@@ -1,6 +1,7 @@
 'use server'
 
 import { adminDb } from '@/lib/firebase/admin'
+import { buildItemAiData, cosineSimilarity, generateSemanticQueryEmbedding } from '@/lib/ai/item-intelligence'
 import { saveFile, deleteFile, type SavedFile } from '@/lib/file-storage'
 import type { Item, ItemImage, GetItemsParams, GetItemsResponse } from '@/lib/types'
 
@@ -85,10 +86,23 @@ export async function createItem(formData: FormData) {
       updatedAt: now,
       deleted: false,
       deletedAt: null,
+      ai: null,
     }
 
     await itemRef.set(itemData)
-    return { item: { id: itemRef.id, ...itemData } as Item }
+    const createdItem = { id: itemRef.id, ...itemData } as Item
+
+    try {
+      const ai = await buildItemAiData(createdItem)
+      if (ai) {
+        await itemRef.update({ ai })
+        createdItem.ai = ai
+      }
+    } catch (error) {
+      console.error('Failed to generate AI data for created item:', error)
+    }
+
+    return { item: createdItem }
   } catch (error) {
     console.error('Failed to create item:', error)
     return { error: 'Failed to create item' }
@@ -126,6 +140,7 @@ export async function updateItem(id: string, formData: FormData) {
 
     const existingData = existingDoc.data() as Omit<Item, 'id'>
     const existingImages = (existingData.images || []).filter(img => !img.deleted)
+    const shouldRefreshAi = savedFiles.length > 0 || !existingData.ai
 
     const newImageRecords: ItemImage[] = savedFiles.map((file, idx) => ({
       id: `${id}_img_${Date.now()}_${idx}`,
@@ -165,11 +180,93 @@ export async function updateItem(id: string, formData: FormData) {
 
     await itemRef.update(updateData)
     const updatedDoc = await itemRef.get()
-    return { item: { id: updatedDoc.id, ...updatedDoc.data() } as Item }
+    const updatedItem = { id: updatedDoc.id, ...updatedDoc.data() } as Item
+
+    if (shouldRefreshAi) {
+      try {
+        const ai = await buildItemAiData(updatedItem)
+        await itemRef.update({ ai })
+        updatedItem.ai = ai
+      } catch (error) {
+        console.error('Failed to refresh AI data for updated item:', error)
+      }
+    }
+
+    return { item: updatedItem }
   } catch (error) {
     console.error('Failed to update item:', error)
     return { error: 'Failed to update item' }
   }
+}
+
+async function getFilteredItems({
+  orderBy = { field: 'name', direction: 'asc' },
+  tags = [],
+  search = '',
+  location = '',
+  semanticQuery = '',
+}: GetItemsParams = {}): Promise<Item[]> {
+  // Firestore doesn't support LIKE queries, so we fetch and filter in memory.
+  // For a personal inventory app with a few hundred items this keeps the
+  // query logic simple while still staying fast enough in practice.
+  let query = itemsCol().where('deleted', '==', false) as FirebaseFirestore.Query
+
+  if (location && location !== 'All') {
+    query = query.where('location.name', '==', location)
+  }
+
+  if (tags.length > 0) {
+    query = query.where('tags', 'array-contains-any', tags)
+  }
+
+  const snapshot = await query.get()
+  let items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Item)
+
+  if (search) {
+    const searchLower = search.toLowerCase()
+    items = items.filter(item =>
+      [
+        item.name,
+        item.notes || '',
+        item.tags.join(' '),
+        item.ai?.searchText || '',
+      ].some(value => value.toLowerCase().includes(searchLower))
+    )
+  }
+
+  if (semanticQuery) {
+    try {
+      const queryEmbedding = await generateSemanticQueryEmbedding(semanticQuery)
+      items = items
+        .map(item => {
+          const vector = item.ai?.imageEmbedding?.vector
+          if (!vector?.length) return null
+          return {
+            item,
+            score: cosineSimilarity(queryEmbedding, vector),
+          }
+        })
+        .filter((entry): entry is { item: Item; score: number } => entry !== null)
+        .sort((left, right) => right.score - left.score)
+        .map(entry => entry.item)
+    } catch (error) {
+      console.error('Failed semantic item search:', error)
+    }
+  } else {
+    const field = orderBy.field as keyof Item
+
+    items.sort((a, b) => {
+      const aVal = (a[field] || '') as string
+      const bVal = (b[field] || '') as string
+      const cmp = aVal.localeCompare(bVal)
+      return orderBy.direction === 'asc' ? cmp : -cmp
+    })
+  }
+
+  return items.map(item => ({
+    ...item,
+    images: (item.images || []).filter(img => !img.deleted),
+  }))
 }
 
 export async function getItems({
@@ -179,49 +276,24 @@ export async function getItems({
   tags = [],
   search = '',
   location = '',
+  semanticQuery = '',
 }: GetItemsParams = {}): Promise<GetItemsResponse> {
   try {
-    // Firestore doesn't support LIKE queries, so we fetch and filter in memory
-    // For a personal inventory app with ~250 items this is perfectly fine
-    let query = itemsCol().where('deleted', '==', false) as FirebaseFirestore.Query
-
-    if (location && location !== 'All') {
-      query = query.where('location.name', '==', location)
-    }
-
-    if (tags.length > 0) {
-      query = query.where('tags', 'array-contains-any', tags)
-    }
-
-    const snapshot = await query.get()
-    let items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Item)
-
-    // Client-side search filter (case-insensitive)
-    if (search) {
-      const searchLower = search.toLowerCase()
-      items = items.filter(item => item.name.toLowerCase().includes(searchLower))
-    }
-
-    // Sort
-    const field = orderBy.field as keyof Item
-    items.sort((a, b) => {
-      const aVal = (a[field] || '') as string
-      const bVal = (b[field] || '') as string
-      const cmp = aVal.localeCompare(bVal)
-      return orderBy.direction === 'asc' ? cmp : -cmp
+    const items = await getFilteredItems({
+      orderBy,
+      tags,
+      search,
+      location,
+      semanticQuery,
     })
 
+    const normalizedPage = Math.max(1, page)
+    const normalizedPageSize = Math.max(1, pageSize)
     const totalItems = items.length
-    const start = (page - 1) * pageSize
-    const paginatedItems = items.slice(start, start + pageSize)
+    const start = (normalizedPage - 1) * normalizedPageSize
+    const paginatedItems = items.slice(start, start + normalizedPageSize)
 
-    // Filter out deleted images
-    const cleanItems = paginatedItems.map(item => ({
-      ...item,
-      images: (item.images || []).filter(img => !img.deleted),
-    }))
-
-    return { items: cleanItems, totalItems }
+    return { items: paginatedItems, totalItems }
   } catch (error) {
     console.error('Failed to fetch items:', error)
     return { items: [], totalItems: 0, error: 'Failed to fetch items' }
@@ -316,11 +388,51 @@ export async function deleteItemImage(itemId: string, imageId: string) {
       return img
     })
 
-    await itemRef.update({ images: updatedImages, updatedAt: now })
+    const nextItem = {
+      id: itemId,
+      ...data,
+      images: updatedImages,
+    } as Item
+
+    let ai = data.ai ?? null
+    if (
+      !ai ||
+      ai.analysis.sourceImageId === imageId ||
+      ai.imageEmbedding.sourceImageId === imageId
+    ) {
+      ai = await buildItemAiData(nextItem)
+    }
+
+    await itemRef.update({ images: updatedImages, updatedAt: now, ai })
     return { success: true }
   } catch (error) {
     console.error('Failed to delete image:', error)
     return { error: 'Failed to delete image' }
+  }
+}
+
+export async function refreshItemAi(id: string) {
+  try {
+    const itemRef = itemsCol().doc(id)
+    const doc = await itemRef.get()
+    if (!doc.exists) {
+      return { error: 'Item not found' }
+    }
+
+    const item = { id: doc.id, ...doc.data() } as Item
+    if (item.deleted) {
+      return { error: 'Item not found' }
+    }
+
+    const ai = await buildItemAiData(item)
+    const updatedAt = new Date().toISOString()
+    await itemRef.update({ ai, updatedAt })
+
+    const updatedDoc = await itemRef.get()
+    return { item: { id: updatedDoc.id, ...updatedDoc.data() } as Item }
+  } catch (error) {
+    console.error('Failed to refresh item AI data:', error)
+    return { error: 'Failed to refresh item AI data' }
   }
 }
 
@@ -346,46 +458,16 @@ export async function getAdjacentItems(
   filterParams: GetItemsParams
 ): Promise<{ prevItem?: Item; nextItem?: Item }> {
   try {
-    const itemsPerPage = filterParams.pageSize || 18
-    const currentPage = filterParams.page || 1
-    const indexInPage = currentIndex % itemsPerPage
-
-    const currentPageResult = await getItems({
-      ...filterParams,
-      page: currentPage,
-      pageSize: itemsPerPage,
-    })
-
-    let prevItem: Item | undefined
-    let nextItem: Item | undefined
-
-    if (indexInPage === 0 && currentPage > 1) {
-      const prevPageResult = await getItems({
-        ...filterParams,
-        page: currentPage - 1,
-        pageSize: itemsPerPage,
-      })
-      if (prevPageResult.items.length > 0) {
-        prevItem = prevPageResult.items[prevPageResult.items.length - 1]
-      }
-    } else if (indexInPage > 0) {
-      prevItem = currentPageResult.items[indexInPage - 1]
+    if (currentIndex < 0) {
+      return {}
     }
 
-    if (indexInPage === itemsPerPage - 1) {
-      const nextPageResult = await getItems({
-        ...filterParams,
-        page: currentPage + 1,
-        pageSize: itemsPerPage,
-      })
-      if (nextPageResult.items.length > 0) {
-        nextItem = nextPageResult.items[0]
-      }
-    } else if (indexInPage < currentPageResult.items.length - 1) {
-      nextItem = currentPageResult.items[indexInPage + 1]
-    }
+    const items = await getFilteredItems(filterParams)
 
-    return { prevItem, nextItem }
+    return {
+      prevItem: currentIndex > 0 ? items[currentIndex - 1] : undefined,
+      nextItem: currentIndex < items.length - 1 ? items[currentIndex + 1] : undefined,
+    }
   } catch (error) {
     console.error('Error getting adjacent items:', error)
     return {}

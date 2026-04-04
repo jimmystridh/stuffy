@@ -8,14 +8,15 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
-import { Trash2 } from 'lucide-react'
-import { deleteItem, getItemByItemId } from '@/app/actions/items'
+import { Loader2, Sparkles, Trash2 } from 'lucide-react'
+import { deleteItem, getItemByItemId, refreshItemAi } from '@/app/actions/items'
 import type { Item } from '@/lib/types'
 
 export function Page({ params }: { params: { id: string } }) {
   const router = useRouter()
   const [item, setItem] = useState<Item | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshingAi, setRefreshingAi] = useState(false)
 
   useEffect(() => {
     const loadItem = async () => {
@@ -42,6 +43,22 @@ export function Page({ params }: { params: { id: string } }) {
       }
     } catch (error) {
       console.error('Delete error:', error)
+    }
+  }
+
+  const handleRefreshAi = async () => {
+    if (!item) return
+
+    setRefreshingAi(true)
+    try {
+      const result = await refreshItemAi(item.id)
+      if (result.item) {
+        setItem(result.item)
+      }
+    } catch (error) {
+      console.error('AI refresh error:', error)
+    } finally {
+      setRefreshingAi(false)
     }
   }
 
@@ -136,6 +153,65 @@ export function Page({ params }: { params: { id: string } }) {
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
+            <CardTitle>AI Identification</CardTitle>
+            <Button
+              variant="outline"
+              onClick={handleRefreshAi}
+              disabled={refreshingAi || item.images.length === 0}
+              className="gap-2"
+            >
+              {refreshingAi ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {item.ai ? 'Refresh AI' : 'Analyze Images'}
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {item.ai ? (
+              <>
+                <div>
+                  <p className="text-sm text-muted-foreground">Identified as</p>
+                  <p className="font-semibold">{item.ai.analysis.identifiedName}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Summary</p>
+                  <p>{item.ai.analysis.summary}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="secondary">{item.ai.analysis.category}</Badge>
+                  <Badge variant="outline">Confidence: {item.ai.analysis.confidence}</Badge>
+                  <Badge variant="outline">
+                    Indexed: {item.ai.imageEmbedding.dimensions}d
+                  </Badge>
+                </div>
+                {item.ai.analysis.attributes.length > 0 && (
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-2">Visible attributes</p>
+                    <div className="flex flex-wrap gap-2">
+                      {item.ai.analysis.attributes.map(attribute => (
+                        <Badge key={attribute} variant="outline">{attribute}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {item.ai.analysis.suggestedTags.length > 0 && (
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-2">Suggested tags</p>
+                    <div className="flex flex-wrap gap-2">
+                      {item.ai.analysis.suggestedTags.map(tag => (
+                        <Badge key={tag} variant="secondary">{tag}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No AI analysis has been generated for this item yet.
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>

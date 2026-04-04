@@ -3,9 +3,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
-import { Loader2 } from 'lucide-react'
-import { getItemById, getItems } from '@/app/actions/items'
+import { Loader2, Sparkles } from 'lucide-react'
+import { getItemById, getItems, refreshItemAi } from '@/app/actions/items'
 import { getLocations } from '@/app/actions/locations'
 import { ItemHeader } from './item/components/ItemHeader'
 import { FormFields } from './item/components/FormFields'
@@ -14,7 +16,7 @@ import { TagInput } from './item/components/TagInput'
 import { LocationSelect } from './item/components/LocationSelect'
 import { useItemForm } from './item/hooks/useItemForm'
 import { useItemNavigation } from './item/hooks/useItemNavigation'
-import type { Location } from '@/lib/types'
+import type { Item, Location } from '@/lib/types'
 
 export function Page({ params }: { params: { id: string } }) {
   const searchParams = useSearchParams()
@@ -23,6 +25,8 @@ export function Page({ params }: { params: { id: string } }) {
   const [locations, setLocations] = useState<Location[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [totalItems, setTotalItems] = useState(0)
+  const [itemAi, setItemAi] = useState<Item['ai']>(null)
+  const [isRefreshingAi, setIsRefreshingAi] = useState(false)
 
   const {
     item,
@@ -73,9 +77,11 @@ export function Page({ params }: { params: { id: string } }) {
           images: result.item.images || [],
           locationId: result.item.locationId
         })
+        setItemAi(result.item.ai ?? null)
 
         const filterParams = {
           search: searchParams.get('q') || '',
+          semanticQuery: searchParams.get('semanticQ') || '',
           location: searchParams.get('location') || '',
           tags: searchParams.get('tags')?.split(',').filter(Boolean) || [],
           orderBy: {
@@ -104,6 +110,22 @@ export function Page({ params }: { params: { id: string } }) {
     }
     loadLocations()
   }, [])
+
+  const handleRefreshAi = async () => {
+    if (isNewItem) return
+
+    setIsRefreshingAi(true)
+    try {
+      const result = await refreshItemAi(params.id)
+      if (result.item) {
+        setItemAi(result.item.ai ?? null)
+      }
+    } catch (error) {
+      console.error('Failed to refresh AI data:', error)
+    } finally {
+      setIsRefreshingAi(false)
+    }
+  }
 
   return (
     <div className="container mx-auto p-4">
@@ -164,6 +186,51 @@ export function Page({ params }: { params: { id: string } }) {
             fileInputRef={fileInputRef}
           />
         </div>
+
+        {!isNewItem && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
+              <CardTitle>AI Identification</CardTitle>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleRefreshAi}
+                disabled={isRefreshingAi || item.images.length === 0}
+                className="gap-2"
+              >
+                {isRefreshingAi ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                {itemAi ? 'Refresh AI' : 'Analyze Images'}
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {itemAi ? (
+                <>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Identified as</p>
+                    <p className="font-semibold">{itemAi.analysis.identifiedName}</p>
+                  </div>
+                  <p className="text-sm">{itemAi.analysis.summary}</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="secondary">{itemAi.analysis.category}</Badge>
+                    <Badge variant="outline">Confidence: {itemAi.analysis.confidence}</Badge>
+                    <Badge variant="outline">Indexed: {itemAi.imageEmbedding.dimensions}d</Badge>
+                  </div>
+                  {itemAi.analysis.suggestedTags.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {itemAi.analysis.suggestedTags.map(tag => (
+                        <Badge key={tag} variant="secondary">{tag}</Badge>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Save the item with at least one image, then run AI analysis to identify and index it.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <Button type="submit" disabled={isSaving} className="w-full">
           {isSaving ? (

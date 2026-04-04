@@ -1,81 +1,264 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import Image from 'next/image'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Label } from "@/components/ui/label"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Search, SortAsc, SortDesc, Grid, List, Plus, Camera } from 'lucide-react'
+import { startTransition, useEffect, useEffectEvent, useRef, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Label } from '@/components/ui/label'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Search, SortAsc, SortDesc, Grid, List, Plus, Camera, Sparkles } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
-import { getItems, getAllTags } from '@/app/actions/items'
+import { VirtualizedItemCollection } from '@/components/virtualized-item-collection'
+import { getAllTags, getItems } from '@/app/actions/items'
 import { getLocations } from '@/app/actions/locations'
 import type { Item, Location } from '@/lib/types'
+
+const ITEM_BATCH_SIZE = 36
+
+function parseRestoreIndex(value: string | null) {
+  if (value === null) {
+    return -1
+  }
+
+  const parsedValue = Number.parseInt(value, 10)
+  return Number.isNaN(parsedValue) ? -1 : parsedValue
+}
+
+function CardCollectionSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {Array.from({ length: 9 }).map((_, index) => (
+        <Card key={index} className="overflow-hidden">
+          <div className="relative aspect-square animate-pulse bg-gray-200" />
+          <CardContent className="p-4">
+            <div className="mb-2 h-4 w-24 animate-pulse rounded bg-gray-200" />
+            <div className="mb-2 h-4 w-16 animate-pulse rounded bg-gray-200" />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
+function ListCollectionSkeleton() {
+  return (
+    <div className="overflow-x-auto">
+      <div className="min-w-[980px] overflow-hidden rounded-xl border">
+        {Array.from({ length: 8 }).map((_, index) => (
+          <div
+            key={index}
+            className="grid grid-cols-[72px_minmax(180px,1.4fr)_minmax(110px,0.9fr)_minmax(140px,1fr)_minmax(140px,0.9fr)_minmax(120px,0.8fr)_minmax(220px,1.2fr)] items-center gap-x-4 border-b px-4 py-3"
+          >
+            <div className="h-[50px] w-[50px] animate-pulse rounded-full bg-gray-200" />
+            <div className="h-4 w-32 animate-pulse rounded bg-gray-200" />
+            <div className="h-4 w-20 animate-pulse rounded bg-gray-200" />
+            <div className="h-4 w-24 animate-pulse rounded bg-gray-200" />
+            <div className="h-4 w-24 animate-pulse rounded bg-gray-200" />
+            <div className="h-4 w-16 animate-pulse rounded bg-gray-200" />
+            <div className="h-4 w-40 animate-pulse rounded bg-gray-200" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function mergePageIntoCache(
+  currentItems: Array<Item | undefined>,
+  totalItems: number,
+  page: number,
+  pageItems: Item[]
+) {
+  const nextItems = Array.from({ length: totalItems }, (_, index) => currentItems[index])
+  const startIndex = (page - 1) * ITEM_BATCH_SIZE
+
+  pageItems.forEach((item, offset) => {
+    const targetIndex = startIndex + offset
+    if (targetIndex < totalItems) {
+      nextItems[targetIndex] = item
+    }
+  })
+
+  return nextItems
+}
 
 export function Page() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const requestVersionRef = useRef(0)
+  const loadedPagesRef = useRef<Set<number>>(new Set())
+  const loadingPagesRef = useRef<Set<number>>(new Set())
 
-  const [items, setItems] = useState<Item[]>([])
+  const [itemsByIndex, setItemsByIndex] = useState<Array<Item | undefined>>([])
   const [locations, setLocations] = useState<Location[]>([])
   const [allTags, setAllTags] = useState<string[]>([])
   const [totalItems, setTotalItems] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
+  const [isFiltersLoading, setIsFiltersLoading] = useState(true)
 
   const searchTerm = searchParams.get('q') || ''
+  const semanticQuery = searchParams.get('semanticQ') || ''
+  const selectedTagsParam = searchParams.get('tags') || ''
   const selectedLocation = searchParams.get('location') || 'All'
-  const selectedTags = searchParams.get('tags')?.split(',').filter(Boolean) || []
+  const selectedTags = selectedTagsParam ? selectedTagsParam.split(',').filter(Boolean) : []
   const sortBy = searchParams.get('sort') || 'name'
   const sortOrder = (searchParams.get('order') || 'asc') as 'asc' | 'desc'
   const viewMode = (searchParams.get('view') || 'card') as 'card' | 'list'
-  const currentPage = parseInt(searchParams.get('page') || '1', 10)
-  const itemsPerPage = viewMode === 'card' ? 18 : 100
+  const restoreIndex = parseRestoreIndex(searchParams.get('index'))
+  const [semanticInput, setSemanticInput] = useState(semanticQuery)
+
+  const filterSignature = [
+    searchTerm,
+    semanticQuery,
+    selectedTagsParam,
+    selectedLocation,
+    sortBy,
+    sortOrder,
+  ].join('::')
+  const restoreKey = restoreIndex >= 0 ? `${filterSignature}::${restoreIndex}` : null
+  const loadedItemsCount = itemsByIndex.reduce((count, item) => count + (item ? 1 : 0), 0)
 
   useEffect(() => {
-    const loadData = async () => {
+    setSemanticInput(semanticQuery)
+  }, [semanticQuery])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadFilters = async () => {
       try {
-        const [itemsResult, tags, locationsResult] = await Promise.all([
-          getItems({
-            page: currentPage,
-            pageSize: itemsPerPage,
-            orderBy: { field: sortBy, direction: sortOrder },
-            tags: selectedTags,
-            search: searchTerm,
-            location: selectedLocation,
-          }),
+        const [tags, locationsResult] = await Promise.all([
           getAllTags(),
           getLocations(),
         ])
 
-        if (!itemsResult.error) {
-          setItems(itemsResult.items)
-          setTotalItems(itemsResult.totalItems)
+        if (cancelled) {
+          return
         }
+
         setAllTags(tags)
         if (locationsResult.locations) {
           setLocations(locationsResult.locations)
         }
       } catch {
-        console.error('Failed to load data')
+        console.error('Failed to load filters')
       } finally {
-        setIsLoading(false)
+        if (!cancelled) {
+          setIsFiltersLoading(false)
+        }
       }
     }
 
-    const timeoutId = setTimeout(loadData, 100)
-    return () => clearTimeout(timeoutId)
-  }, [searchParams, currentPage, itemsPerPage, sortBy, sortOrder, searchTerm, selectedLocation, selectedTags])
+    void loadFilters()
 
-  const totalPages = Math.ceil(totalItems / itemsPerPage)
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
-  const updateUrlParams = (updates: Record<string, string | null>) => {
-    const params = new URLSearchParams(searchParams)
+  const loadPage = async (page: number) => {
+    if (page < 1) {
+      return
+    }
+
+    const requestVersion = requestVersionRef.current
+    if (loadedPagesRef.current.has(page) || loadingPagesRef.current.has(page)) {
+      return
+    }
+
+    loadingPagesRef.current.add(page)
+
+    try {
+      const itemsResult = await getItems({
+        page,
+        pageSize: ITEM_BATCH_SIZE,
+        orderBy: { field: sortBy, direction: sortOrder },
+        tags: selectedTags,
+        search: searchTerm,
+        location: selectedLocation,
+        semanticQuery,
+      })
+
+      if (requestVersionRef.current !== requestVersion || itemsResult.error) {
+        return
+      }
+
+      loadedPagesRef.current.add(page)
+      setTotalItems(itemsResult.totalItems)
+      setItemsByIndex((currentItems) =>
+        mergePageIntoCache(currentItems, itemsResult.totalItems, page, itemsResult.items)
+      )
+    } catch {
+      console.error('Failed to load items')
+    } finally {
+      if (requestVersionRef.current === requestVersion) {
+        loadingPagesRef.current.delete(page)
+        setIsLoading(false)
+      }
+    }
+  }
+
+  const loadPagesForRange = (startIndex: number, endIndex: number) => {
+    if (totalItems === 0) {
+      return
+    }
+
+    const lastIndex = Math.max(0, totalItems - 1)
+    const clampedStart = Math.max(0, startIndex)
+    const clampedEnd = Math.min(lastIndex, endIndex)
+    const maxPage = Math.max(1, Math.ceil(totalItems / ITEM_BATCH_SIZE))
+    const startPage = Math.max(1, Math.floor(clampedStart / ITEM_BATCH_SIZE) + 1)
+    const endPage = Math.max(startPage, Math.floor(clampedEnd / ITEM_BATCH_SIZE) + 1)
+    const preloadStart = Math.max(1, startPage - 1)
+    const preloadEnd = Math.min(maxPage, endPage + 1)
+
+    for (let page = preloadStart; page <= preloadEnd; page += 1) {
+      void loadPage(page)
+    }
+  }
+
+  const loadInitialPage = useEffectEvent((page: number) => {
+    void loadPage(page)
+  })
+
+  useEffect(() => {
+    requestVersionRef.current += 1
+    loadedPagesRef.current = new Set()
+    loadingPagesRef.current = new Set()
+    setItemsByIndex([])
+    setTotalItems(0)
+    setIsLoading(true)
+
+    if (restoreIndex < 0) {
+      window.scrollTo({ top: 0, behavior: 'auto' })
+    }
+
+    const initialPage = Math.max(1, Math.floor(Math.max(restoreIndex, 0) / ITEM_BATCH_SIZE) + 1)
+    const timeoutId = window.setTimeout(() => {
+      loadInitialPage(initialPage)
+    }, 100)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [filterSignature, restoreIndex])
+
+  const updateUrlParams = (
+    updates: Record<string, string | null>,
+    options?: { preserveIndex?: boolean }
+  ) => {
+    const params = new URLSearchParams(searchParams.toString())
+
+    params.delete('page')
+
+    if (!options?.preserveIndex && !Object.prototype.hasOwnProperty.call(updates, 'index')) {
+      params.delete('index')
+    }
+
     Object.entries(updates).forEach(([key, value]) => {
       if (value === null) {
         params.delete(key)
@@ -83,54 +266,66 @@ export function Page() {
         params.set(key, value)
       }
     })
-    router.push(`${pathname}?${params.toString()}`)
+
+    const query = params.toString()
+
+    startTransition(() => {
+      router.push(query ? `${pathname}?${query}` : pathname)
+    })
   }
 
   const toggleTag = (tag: string) => {
     const newTags = selectedTags.includes(tag) ? [] : [tag]
     updateUrlParams({
       tags: newTags.length > 0 ? newTags.join(',') : null,
-      page: '1'
     })
   }
 
-  const handlePageChange = (page: number) => {
-    updateUrlParams({ page: page.toString() })
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+  const handleViewModeChange = () => {
+    updateUrlParams({ view: viewMode === 'card' ? 'list' : 'card' }, { preserveIndex: true })
   }
 
-  const handleViewModeChange = () => {
-    updateUrlParams({ view: viewMode === 'card' ? 'list' : 'card', page: '1' })
+  const handleSemanticSearch = (event: React.FormEvent) => {
+    event.preventDefault()
+    updateUrlParams({
+      semanticQ: semanticInput.trim() || null,
+    })
+  }
+
+  const clearSemanticSearch = () => {
+    setSemanticInput('')
+    updateUrlParams({ semanticQ: null })
   }
 
   const handleItemClick = (id: string, index: number) => {
     const currentFilters = new URLSearchParams(searchParams.toString())
     currentFilters.set('index', index.toString())
+    currentFilters.delete('page')
     router.push(`/item/${id}?${currentFilters.toString()}`)
   }
 
   return (
     <div className="min-h-screen">
       <div className="container mx-auto p-4 transition-colors duration-200">
-        <header className="flex flex-col md:flex-row justify-between items-center mb-8">
-          <h1 className="text-4xl font-bold mb-4 md:mb-0 bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-600">
+        <header className="mb-8 flex flex-col items-center justify-between md:flex-row">
+          <h1 className="mb-4 bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-4xl font-bold text-transparent md:mb-0">
             Personal Inventory
           </h1>
           <div className="flex items-center space-x-4">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="rounded-full">
-                  <Plus className="h-4 w-4 mr-2" />
+                  <Plus className="mr-2 h-4 w-4" />
                   Add Item
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => router.push('/item/new')}>
-                  <Plus className="h-4 w-4 mr-2" />
+                  <Plus className="mr-2 h-4 w-4" />
                   Regular Add
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => router.push('/quick-add')}>
-                  <Camera className="h-4 w-4 mr-2" />
+                  <Camera className="mr-2 h-4 w-4" />
                   Quick Add
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -139,15 +334,49 @@ export function Page() {
           </div>
         </header>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="mb-6 rounded-2xl border bg-background/80 p-4">
+          <form onSubmit={handleSemanticSearch} className="flex flex-col gap-3 md:flex-row md:items-center">
+            <div className="flex-1">
+              <Label htmlFor="semantic-search" className="mb-2 inline-flex items-center gap-2">
+                <Sparkles className="h-4 w-4" />
+                AI Search
+              </Label>
+              <Input
+                id="semantic-search"
+                type="text"
+                placeholder="Describe the item you want to find from its images..."
+                value={semanticInput}
+                onChange={(event) => setSemanticInput(event.target.value)}
+              />
+            </div>
+            <div className="flex gap-2 md:self-end">
+              <Button type="submit" className="gap-2">
+                <Sparkles className="h-4 w-4" />
+                Search Images
+              </Button>
+              {semanticQuery && (
+                <Button type="button" variant="outline" onClick={clearSemanticSearch}>
+                  Clear
+                </Button>
+              )}
+            </div>
+          </form>
+          {semanticQuery && (
+            <p className="mt-3 text-sm text-muted-foreground">
+              AI-ranked results for &quot;{semanticQuery}&quot; using stored image embeddings.
+            </p>
+          )}
+        </div>
+
+        <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-4">
           <div className="md:col-span-3">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 transform text-gray-400" />
               <Input
                 type="text"
                 placeholder="Search items..."
                 value={searchTerm}
-                onChange={(e) => updateUrlParams({ q: e.target.value || null, page: '1' })}
+                onChange={(event) => updateUrlParams({ q: event.target.value || null })}
                 className="pl-10 transition-colors duration-200"
               />
             </div>
@@ -155,13 +384,14 @@ export function Page() {
           <div className="flex space-x-2">
             <div className="flex items-center gap-2">
               {isLoading ? (
-                <span className="h-4 w-20 bg-gray-200 rounded animate-pulse inline-block" />
+                <span className="inline-block h-4 w-28 animate-pulse rounded bg-gray-200" />
               ) : (
                 <p className="text-sm text-muted-foreground">
                   {totalItems} {totalItems === 1 ? 'item' : 'items'}
+                  {totalItems > loadedItemsCount ? `, ${loadedItemsCount} loaded` : ''}
                 </p>
               )}
-              <Select value={sortBy} onValueChange={(value) => updateUrlParams({ sort: value, page: '1' })}>
+              <Select value={sortBy} onValueChange={(value) => updateUrlParams({ sort: value })}>
                 <SelectTrigger>
                   <SelectValue placeholder="Sort by" />
                 </SelectTrigger>
@@ -174,7 +404,7 @@ export function Page() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => updateUrlParams({ order: sortOrder === 'asc' ? 'desc' : 'asc', page: '1' })}
+                onClick={() => updateUrlParams({ order: sortOrder === 'asc' ? 'desc' : 'asc' })}
               >
                 {sortOrder === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />}
               </Button>
@@ -185,14 +415,17 @@ export function Page() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-4">
           <div className="space-y-6">
             <div>
               <Label>Location</Label>
-              {isLoading ? (
-                <div className="h-10 w-full bg-gray-200 rounded animate-pulse mt-2" />
+              {isFiltersLoading ? (
+                <div className="mt-2 h-10 w-full animate-pulse rounded bg-gray-200" />
               ) : (
-                <Select value={selectedLocation} onValueChange={(value) => updateUrlParams({ location: value === 'All' ? null : value, page: '1' })}>
+                <Select
+                  value={selectedLocation}
+                  onValueChange={(value) => updateUrlParams({ location: value === 'All' ? null : value })}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select location" />
                   </SelectTrigger>
@@ -210,10 +443,10 @@ export function Page() {
 
             <div>
               <Label>Tags</Label>
-              <div className="flex flex-wrap gap-2 mt-2">
-                {isLoading ? (
-                  Array.from({ length: 6 }).map((_, i) => (
-                    <div key={i} className="h-6 w-16 bg-gray-200 rounded-full animate-pulse" />
+              <div className="mt-2 flex flex-wrap gap-2">
+                {isFiltersLoading ? (
+                  Array.from({ length: 6 }).map((_, index) => (
+                    <div key={index} className="h-6 w-16 animate-pulse rounded-full bg-gray-200" />
                   ))
                 ) : (
                   allTags.map((tag) => (
@@ -232,156 +465,26 @@ export function Page() {
           </div>
 
           <div className="md:col-span-3">
-            <AnimatePresence>
-              {viewMode === 'card' ? (
-                isLoading ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {Array.from({ length: 9 }).map((_, index) => (
-                      <Card key={index} className="overflow-hidden">
-                        <div className="aspect-square relative bg-gray-200 animate-pulse" />
-                        <CardContent className="p-4">
-                          <div className="h-4 w-24 bg-gray-200 rounded animate-pulse mb-2" />
-                          <div className="h-4 w-16 bg-gray-200 rounded animate-pulse mb-2" />
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                ) : (
-                  <motion.div
-                    className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                  >
-                    {items.map((item, index) => (
-                      <motion.div key={item.id} layout>
-                        <Card
-                          className="overflow-hidden cursor-pointer transition-all duration-300 hover:shadow-lg hover:scale-105"
-                          onClick={() => handleItemClick(item.id, index)}
-                        >
-                          <div className="aspect-square relative">
-                            {item.images[0]?.thumbnailUrl ? (
-                              <Image
-                                src={item.images[0].thumbnailUrl}
-                                alt={item.name}
-                                fill
-                                priority={index < 9}
-                                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                                style={{ objectFit: 'cover' }}
-                                className="transition-transform duration-300 hover:scale-110"
-                              />
-                            ) : (
-                              <div className="w-full h-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-400">
-                                No image
-                              </div>
-                            )}
-                          </div>
-                          <CardContent className="p-4">
-                            <p className="text-sm text-gray-500 mb-2">ID: {item.itemId}</p>
-                            <p className="text-sm font-semibold mb-2">{item.name}</p>
-                            <div className="flex flex-wrap gap-2">
-                              {item.tags.map(tag => (
-                                <Badge key={tag} variant="secondary" className="text-xs rounded-full">{tag}</Badge>
-                              ))}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </motion.div>
-                    ))}
-                  </motion.div>
-                )
-              ) : (
-                <motion.div
-                  className="overflow-x-auto"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                >
-                  <table className="w-full border-collapse">
-                    <thead>
-                      <tr className="bg-gray-100 dark:bg-gray-800">
-                        <th className="p-2 text-left">Image</th>
-                        <th className="p-2 text-left">Name</th>
-                        <th className="p-2 text-left">ID</th>
-                        <th className="p-2 text-left">Location</th>
-                        <th className="p-2 text-left">Date Created</th>
-                        <th className="p-2 text-left">Price</th>
-                        <th className="p-2 text-left">Tags</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.map((item, index) => (
-                        <motion.tr
-                          key={item.id}
-                          className="border-b cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors duration-200"
-                          onClick={() => handleItemClick(item.id, index)}
-                        >
-                          <td className="p-2">
-                            <div className="relative w-[50px] h-[50px]">
-                              {item.images[0]?.thumbnailUrl ? (
-                                <Image
-                                  src={item.images[0].thumbnailUrl}
-                                  alt={item.name}
-                                  fill
-                                  sizes="50px"
-                                  style={{ objectFit: 'cover' }}
-                                  className="rounded-full"
-                                />
-                              ) : (
-                                <div className="w-full h-full rounded-full bg-gray-200 dark:bg-gray-700" />
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-2 font-medium">{item.name}</td>
-                          <td className="p-2 text-sm text-gray-500">{item.itemId}</td>
-                          <td className="p-2">{item.location?.name}</td>
-                          <td className="p-2 text-sm">{new Date(item.createdAt).toLocaleDateString()}</td>
-                          <td className="p-2 font-semibold">{item.purchasePrice ? `$${item.purchasePrice}` : ''}</td>
-                          <td className="p-2">
-                            <div className="flex flex-wrap gap-1">
-                              {item.tags.map(tag => (
-                                <Badge key={tag} variant="secondary" className="text-xs rounded-full">{tag}</Badge>
-                              ))}
-                            </div>
-                          </td>
-                        </motion.tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <div className="mt-8 flex justify-center">
-              <nav className="inline-flex rounded-md shadow">
-                <Button
-                  variant="outline"
-                  onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage === 1}
-                  className="rounded-l-md"
-                >
-                  Previous
-                </Button>
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                  <Button
-                    key={page}
-                    variant={currentPage === page ? "default" : "outline"}
-                    onClick={() => handlePageChange(page)}
-                    className="rounded-none"
-                  >
-                    {page}
-                  </Button>
-                ))}
-                <Button
-                  variant="outline"
-                  onClick={() => handlePageChange(currentPage + 1)}
-                  disabled={currentPage === totalPages}
-                  className="rounded-r-md"
-                >
-                  Next
-                </Button>
-              </nav>
-            </div>
+            {isLoading ? (
+              viewMode === 'card' ? <CardCollectionSkeleton /> : <ListCollectionSkeleton />
+            ) : totalItems === 0 ? (
+              <Card>
+                <CardContent className="p-6 text-sm text-muted-foreground">
+                  No items matched the current filters.
+                  {semanticQuery ? ' Try adjusting the AI search description or refresh AI indexing on older items.' : ''}
+                </CardContent>
+              </Card>
+            ) : (
+              <VirtualizedItemCollection
+                itemsByIndex={itemsByIndex}
+                totalItems={totalItems}
+                viewMode={viewMode}
+                onItemClick={handleItemClick}
+                onVisibleRangeChange={loadPagesForRange}
+                restoreIndex={restoreIndex}
+                restoreKey={restoreKey}
+              />
+            )}
           </div>
         </div>
       </div>

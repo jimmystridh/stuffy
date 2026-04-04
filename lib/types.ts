@@ -13,6 +13,33 @@ export interface ItemImage {
   deletedAt: string | null
 }
 
+export interface ItemAiAnalysis {
+  model: string
+  identifiedName: string
+  category: string
+  summary: string
+  attributes: string[]
+  suggestedTags: string[]
+  confidence: 'low' | 'medium' | 'high'
+  sourceImageId: string
+  analyzedAt: string
+}
+
+export interface ItemAiEmbedding {
+  model: string
+  dimensions: number
+  vector: number[]
+  normalized: boolean
+  sourceImageId: string
+  indexedAt: string
+}
+
+export interface ItemAiData {
+  analysis: ItemAiAnalysis
+  imageEmbedding: ItemAiEmbedding
+  searchText: string
+}
+
 export interface Location {
   id: string
   name: string
@@ -36,6 +63,7 @@ export interface Item {
   updatedAt: string
   deleted: boolean
   deletedAt: string | null
+  ai: ItemAiData | null
 }
 
 export interface GetItemsParams {
@@ -48,6 +76,7 @@ export interface GetItemsParams {
   tags?: string[]
   search?: string
   location?: string
+  semanticQuery?: string
 }
 
 export interface GetItemsResponse {

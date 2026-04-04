@@ -3,29 +3,35 @@
 import { useRouter, useSearchParams } from 'next/navigation'
 import { getAdjacentItems } from '@/app/actions/items'
 
+const parseIndex = (value: string | null) => {
+  const parsedValue = Number.parseInt(value || '0', 10)
+  return Number.isNaN(parsedValue) ? 0 : parsedValue
+}
+
 export const useItemNavigation = (totalItems: number) => {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const currentIndex = parseInt(searchParams.get('index') || '0', 10)
-  const itemsPerPage = searchParams.get('view') === 'list' ? 100 : 18
-  const currentPage = parseInt(searchParams.get('page') || '1', 10)
+  const currentIndex = parseIndex(searchParams.get('index'))
 
-  const hasPrevious = currentIndex > 0 || (currentIndex === 0 && currentPage > 1)
-  const hasNext = currentIndex < itemsPerPage - 1 || (currentIndex === itemsPerPage - 1 && totalItems > itemsPerPage * currentPage)
+  const hasPrevious = currentIndex > 0
+  const hasNext = totalItems > 0 && currentIndex < totalItems - 1
 
   const navigateToAdjacent = async (direction: 'prev' | 'next') => {
-    const newIndex = direction === 'prev' ? currentIndex - 1 : currentIndex + 1
+    const targetIndex = direction === 'prev' ? currentIndex - 1 : currentIndex + 1
+
+    if (targetIndex < 0 || targetIndex >= totalItems) {
+      return
+    }
 
     const filterParams = {
       search: searchParams.get('q') || '',
+      semanticQuery: searchParams.get('semanticQ') || '',
       location: searchParams.get('location') || '',
       tags: searchParams.get('tags')?.split(',').filter(Boolean) || [],
       orderBy: {
         field: searchParams.get('sort') || 'name',
         direction: (searchParams.get('order') || 'asc') as 'asc' | 'desc'
       },
-      page: currentPage,
-      pageSize: itemsPerPage
     }
 
     const adjacentItems = await getAdjacentItems(currentIndex, filterParams)
@@ -33,22 +39,16 @@ export const useItemNavigation = (totalItems: number) => {
 
     if (targetItem) {
       const currentFilters = new URLSearchParams(searchParams.toString())
-      currentFilters.set('index', newIndex.toString())
-
-      if (newIndex < 0) {
-        currentFilters.set('page', (currentPage - 1).toString())
-        currentFilters.set('index', (itemsPerPage - 1).toString())
-      } else if (newIndex >= itemsPerPage) {
-        currentFilters.set('page', (currentPage + 1).toString())
-        currentFilters.set('index', '0')
-      }
+      currentFilters.set('index', targetIndex.toString())
+      currentFilters.delete('page')
 
       router.push(`/item/${targetItem.id}?${currentFilters.toString()}`)
     }
   }
 
   const navigateBack = () => {
-    router.push(`/?${searchParams.toString()}`)
+    const query = searchParams.toString()
+    router.push(query ? `/?${query}` : '/')
   }
 
   return {
