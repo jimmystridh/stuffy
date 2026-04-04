@@ -3,7 +3,6 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/firebase/auth-context'
-import { getFirebaseAuth } from '@/lib/firebase/config'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
@@ -16,24 +15,6 @@ export default function LoginPage() {
       router.push('/')
     }
   }, [user, loading, router])
-
-  const handleSignIn = async () => {
-    try {
-      await signIn()
-      // Get ID token and create session
-      const idToken = await getFirebaseAuth().currentUser?.getIdToken()
-      if (idToken) {
-        await fetch('/api/auth/session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken }),
-        })
-        router.push('/')
-      }
-    } catch (error) {
-      console.error('Login failed:', error)
-    }
-  }
 
   if (loading) {
     return (
@@ -51,7 +32,7 @@ export default function LoginPage() {
           <p className="text-center text-muted-foreground">Personal Inventory Tracker</p>
         </CardHeader>
         <CardContent>
-          <Button onClick={handleSignIn} className="w-full" size="lg">
+          <Button onClick={signIn} className="w-full" size="lg">
             Sign in with Google
           </Button>
         </CardContent>

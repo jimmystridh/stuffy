@@ -3,7 +3,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import {
   onAuthStateChanged,
-  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut as firebaseSignOut,
   type User,
 } from 'firebase/auth'
@@ -29,6 +30,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const auth = getFirebaseAuth()
+
+    // Handle redirect result when returning from Google sign-in
+    getRedirectResult(auth).then(async (result) => {
+      if (result?.user) {
+        const allowedEmails = (process.env.NEXT_PUBLIC_ALLOWED_EMAILS || '').split(',').map(e => e.trim())
+        if (!result.user.email || !allowedEmails.includes(result.user.email)) {
+          await firebaseSignOut(auth)
+          return
+        }
+        // Create session cookie
+        const idToken = await result.user.getIdToken()
+        await fetch('/api/auth/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken }),
+        })
+        window.location.href = '/'
+      }
+    }).catch(console.error)
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user)
       setLoading(false)
@@ -38,17 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async () => {
     const auth = getFirebaseAuth()
-    try {
-      const result = await signInWithPopup(auth, googleProvider)
-      const allowedEmails = (process.env.NEXT_PUBLIC_ALLOWED_EMAILS || '').split(',').map(e => e.trim())
-      if (!result.user.email || !allowedEmails.includes(result.user.email)) {
-        await firebaseSignOut(auth)
-        throw new Error('Unauthorized email address')
-      }
-    } catch (error) {
-      console.error('Sign in error:', error)
-      throw error
-    }
+    await signInWithRedirect(auth, googleProvider)
   }
 
   const signOut = async () => {
