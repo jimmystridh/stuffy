@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -17,19 +17,41 @@ import {
   type InventeringSession,
 } from '@/app/actions/inventering'
 import type { Location, Item } from '@/lib/types'
-import { Suspense } from 'react'
 
-function InventeringContent() {
+function SessionHeader({
+  session,
+  items,
+  viewMode,
+  onToggleMode,
+}: {
+  session: InventeringSession
+  items: Item[]
+  viewMode: 'guided' | 'list'
+  onToggleMode: () => void
+}) {
+  return (
+    <div className="flex justify-between items-center mb-4">
+      <h1 className="text-xl font-bold">{session.locationName}</h1>
+      <div className="flex items-center gap-2">
+        <Badge variant="secondary">
+          {Object.keys(session.results).length} / {items.length}
+        </Badge>
+        <Button variant="ghost" size="icon" onClick={onToggleMode} title={viewMode === 'guided' ? 'Switch to list' : 'Switch to guided'}>
+          {viewMode === 'guided' ? <List className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+export default function InventeringPage() {
   const router = useRouter()
-  const searchParams = useSearchParams()
   const [locations, setLocations] = useState<Location[]>([])
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null)
   const [session, setSession] = useState<InventeringSession | null>(null)
   const [items, setItems] = useState<Item[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
-  const [viewMode, setViewMode] = useState<'guided' | 'list'>(
-    (searchParams.get('mode') as 'guided' | 'list') || 'guided'
-  )
+  const [viewMode, setViewMode] = useState<'guided' | 'list'>('guided')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -54,28 +76,25 @@ function InventeringContent() {
   const handleMark = async (itemId: string, status: 'found' | 'missing') => {
     if (!session) return
     await markItem(session.id, itemId, status)
+    const newResults = { ...session.results, [itemId]: status }
     setSession(prev => prev ? {
       ...prev,
-      results: { ...prev.results, [itemId]: status },
-      checkedItems: Object.keys({ ...prev.results, [itemId]: status }).length,
+      results: newResults,
+      checkedItems: Object.keys(newResults).length,
     } : null)
 
-    // In guided mode, advance to next unchecked item
     if (viewMode === 'guided') {
+      const updatedResults = newResults
       const nextUnchecked = items.findIndex(
-        (item, i) => i > currentIndex && !session.results[item.id] && item.id !== itemId
+        (item, i) => i > currentIndex && !updatedResults[item.id]
       )
       if (nextUnchecked >= 0) {
         setCurrentIndex(nextUnchecked)
       } else {
-        // Try from beginning
-        const fromStart = items.findIndex(
-          item => !session.results[item.id] && item.id !== itemId
-        )
+        const fromStart = items.findIndex(item => !updatedResults[item.id])
         if (fromStart >= 0) {
           setCurrentIndex(fromStart)
         } else {
-          // All done — advance past last to show completion
           setCurrentIndex(items.length)
         }
       }
@@ -88,11 +107,13 @@ function InventeringContent() {
     setSession(prev => prev ? { ...prev, completedAt: new Date().toISOString() } : null)
   }
 
+  const toggleMode = () => setViewMode(m => m === 'guided' ? 'list' : 'guided')
+
   const allChecked = session && items.length > 0 && Object.keys(session.results).length >= items.length
   const foundCount = session ? Object.values(session.results).filter(s => s === 'found').length : 0
   const missingCount = session ? Object.values(session.results).filter(s => s === 'missing').length : 0
 
-  // Start screen — pick a location
+  // Start screen
   if (!session) {
     return (
       <div className="container mx-auto p-4 max-w-lg">
@@ -103,7 +124,7 @@ function InventeringContent() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-muted-foreground">
-              Select a location to inventory. You&apos;ll go through each item and confirm whether it&apos;s still there.
+              Select a location to inventory. Go through each item and confirm whether it&apos;s still there.
               Items marked &quot;No&quot; will have their location cleared.
             </p>
             <Select value={selectedLocationId || ''} onValueChange={setSelectedLocationId}>
@@ -116,24 +137,6 @@ function InventeringContent() {
                 ))}
               </SelectContent>
             </Select>
-            <div className="flex gap-2">
-              <Button
-                variant={viewMode === 'guided' ? 'default' : 'outline'}
-                onClick={() => setViewMode('guided')}
-                className="flex-1"
-              >
-                <Play className="h-4 w-4 mr-2" />
-                Guided
-              </Button>
-              <Button
-                variant={viewMode === 'list' ? 'default' : 'outline'}
-                onClick={() => setViewMode('list')}
-                className="flex-1"
-              >
-                <List className="h-4 w-4 mr-2" />
-                List
-              </Button>
-            </div>
             <Button onClick={handleStart} disabled={!selectedLocationId || loading} className="w-full" size="lg">
               {loading ? 'Starting...' : 'Start Inventering'}
             </Button>
@@ -144,7 +147,7 @@ function InventeringContent() {
   }
 
   // Completion screen
-  if (session.completedAt || (allChecked && viewMode === 'guided' && currentIndex >= items.length)) {
+  if (session.completedAt || (allChecked && currentIndex >= items.length)) {
     return (
       <div className="container mx-auto p-4 max-w-lg">
         <h1 className="text-3xl font-bold mb-6">Inventering Complete</h1>
@@ -192,12 +195,7 @@ function InventeringContent() {
 
     return (
       <div className="container mx-auto p-4 max-w-lg">
-        <div className="flex justify-between items-center mb-4">
-          <h1 className="text-xl font-bold">{session.locationName}</h1>
-          <Badge variant="secondary">
-            {Object.keys(session.results).length} / {items.length}
-          </Badge>
-        </div>
+        <SessionHeader session={session} items={items} viewMode={viewMode} onToggleMode={toggleMode} />
 
         <Card>
           <CardContent className="p-0">
@@ -273,12 +271,7 @@ function InventeringContent() {
   // List mode
   return (
     <div className="container mx-auto p-4 max-w-2xl">
-      <div className="flex justify-between items-center mb-4">
-        <h1 className="text-xl font-bold">{session.locationName}</h1>
-        <Badge variant="secondary">
-          {Object.keys(session.results).length} / {items.length}
-        </Badge>
-      </div>
+      <SessionHeader session={session} items={items} viewMode={viewMode} onToggleMode={toggleMode} />
 
       {allChecked && (
         <Card className="mb-4 bg-green-50 dark:bg-green-950 border-green-200">
@@ -348,13 +341,5 @@ function InventeringContent() {
         })}
       </div>
     </div>
-  )
-}
-
-export default function InventeringPage() {
-  return (
-    <Suspense fallback={<div className="flex items-center justify-center min-h-screen">Loading...</div>}>
-      <InventeringContent />
-    </Suspense>
   )
 }
