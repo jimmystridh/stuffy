@@ -118,7 +118,6 @@ async function uploadImage(filename: string): Promise<boolean> {
       destination,
       metadata: { contentType: 'image/jpeg' },
     })
-    await bucket.file(destination).makePublic()
     return true
   } catch (err) {
     console.error(`  Failed to upload ${filename}:`, err)

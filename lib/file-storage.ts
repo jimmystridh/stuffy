@@ -49,14 +49,13 @@ export async function saveFile(file: File): Promise<SavedFile> {
   await fullFile.save(fullBuffer, {
     metadata: { contentType: file.type },
   })
-  await fullFile.makePublic()
+  // Bucket has uniform access with allUsers:objectViewer, no per-object ACL needed
 
   // Upload thumbnail to GCS
   const thumbFile = bucket.file(`images/${thumbnailFilename}`)
   await thumbFile.save(thumbBuffer, {
     metadata: { contentType: file.type },
   })
-  await thumbFile.makePublic()
 
   const bucketName = process.env.GCS_BUCKET_NAME || 'stuffy-uploads'
 
