@@ -297,17 +297,17 @@ export default function StocktakingPage() {
             >
               <CardContent className="p-3 flex items-center gap-3">
                 {item.images[0]?.thumbnailUrl ? (
-                  <div className="relative w-12 h-12 flex-shrink-0">
+                  <div className="relative w-20 h-20 flex-shrink-0">
                     <Image
                       src={item.images[0].thumbnailUrl}
                       alt={item.name}
                       fill
                       className="object-cover rounded"
-                      sizes="48px"
+                      sizes="80px"
                     />
                   </div>
                 ) : (
-                  <div className="w-12 h-12 flex-shrink-0 bg-gray-200 dark:bg-gray-700 rounded" />
+                  <div className="w-20 h-20 flex-shrink-0 bg-gray-200 dark:bg-gray-700 rounded" />
                 )}
 
                 <div className="flex-1 min-w-0">
