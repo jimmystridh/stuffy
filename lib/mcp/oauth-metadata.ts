@@ -4,19 +4,26 @@ function safeBaseOrigin() {
 
 export function getPublicOrigin(request: Request) {
   try {
-    const forwardedHost = request.headers.get('x-forwarded-host')
     const forwardedProtoHeader = request.headers.get('x-forwarded-proto')
     const forwardedProto =
       forwardedProtoHeader?.split(',')[0]?.trim() === 'http' ? 'http' : 'https'
 
-    if (forwardedHost) {
-      const host = forwardedHost.split(',')[0]?.trim()
-      if (host) {
-        const normalizedHost = host.replace(/^https?:\/\//, '').split('/')[0]?.trim()
-        if (normalizedHost) {
-          return `${forwardedProto}://${normalizedHost}`
-        }
+    // Cloud Run: x-forwarded-host or Host header contains the real hostname
+    const forwardedHost = request.headers.get('x-forwarded-host')
+    const hostHeader = request.headers.get('host')
+    const host = forwardedHost?.split(',')[0]?.trim() || hostHeader
+
+    if (host) {
+      const normalizedHost = host.replace(/^https?:\/\//, '').split('/')[0]?.trim()
+      if (normalizedHost && !normalizedHost.startsWith('0.0.0.0') && !normalizedHost.startsWith('127.0.0.1')) {
+        return `${forwardedProto}://${normalizedHost}`
       }
+    }
+
+    // Fallback to configured URL or request URL
+    const explicit = process.env.MCP_RESOURCE_URL
+    if (explicit) {
+      return new URL(explicit).origin
     }
 
     return new URL(request.url).origin

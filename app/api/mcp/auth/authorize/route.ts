@@ -1,5 +1,6 @@
 import { resolveSessionBearerToken } from '@/lib/mcp/session-token'
 import { issueAuthorizationCode } from '@/lib/mcp/oauth-codes'
+import { getPublicOrigin, getPublicUrl } from '@/lib/mcp/oauth-metadata'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -39,8 +40,10 @@ export async function GET(request: Request) {
 
     const sessionToken = await resolveSessionBearerToken({ request })
     if (!sessionToken) {
-      const loginUrl = new URL('/login', new URL(request.url).origin)
-      loginUrl.searchParams.set('callbackUrl', request.url)
+      const origin = getPublicOrigin(request)
+      const publicAuthorizeUrl = getPublicUrl(request, `/api/mcp/auth/authorize${url.search}`)
+      const loginUrl = new URL('/login', origin)
+      loginUrl.searchParams.set('callbackUrl', publicAuthorizeUrl)
       return redirectResponse(loginUrl.toString(), 307)
     }
 
