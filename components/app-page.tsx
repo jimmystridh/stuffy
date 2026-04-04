@@ -302,26 +302,29 @@ export function Page() {
 
         <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-4">
           <div className="md:col-span-3">
-            <form onSubmit={handleSearchSubmit} className="relative flex items-center gap-2">
+            <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 size="icon"
                 onClick={cycleSearchMode}
-                className="absolute left-1 top-1/2 -translate-y-1/2 h-8 w-8 z-10"
+                className="shrink-0"
                 title={`Search mode: ${modeConfig.label}. Click to cycle.`}
               >
                 <ModeIcon className="h-4 w-4" />
               </Button>
-              <Input
-                type="text"
-                placeholder={modeConfig.placeholder}
-                value={searchInput}
-                onChange={(e) => handleSearchInput(e.target.value)}
-                className="pl-10 pr-4 transition-colors duration-200"
-              />
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  type="text"
+                  placeholder={modeConfig.placeholder}
+                  value={searchInput}
+                  onChange={(e) => handleSearchInput(e.target.value)}
+                  className="pl-9 transition-colors duration-200"
+                />
+              </div>
               {searchMode === 'ai' && (
-                <Button type="submit" size="sm" className="gap-1">
+                <Button type="submit" size="sm" className="shrink-0 gap-1">
                   <Sparkles className="h-3 w-3" />
                   Search
                 </Button>
