@@ -11,6 +11,8 @@ export function middleware(request: NextRequest) {
   const publicPaths = [
     '/login',
     '/api/auth',
+    '/api/mcp',
+    '/.well-known',
     '/_next',
     '/favicon.ico',
     '/manifest.webmanifest',

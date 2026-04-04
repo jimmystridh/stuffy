@@ -24,7 +24,8 @@ export default function LoginPage() {
         body: JSON.stringify({ idToken }),
       })
       if (res.ok) {
-        window.location.href = '/'
+        const params = new URLSearchParams(window.location.search)
+        window.location.href = params.get('callbackUrl') || '/'
       } else {
         setError('Session creation failed. You may not be authorized.')
         setSettingUpSession(false)

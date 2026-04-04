@@ -2,7 +2,7 @@
 
 import { adminDb } from '@/lib/firebase/admin'
 import { buildItemAiData, cosineSimilarity, generateSemanticQueryEmbedding } from '@/lib/ai/item-intelligence'
-import { saveFile, deleteFile, type SavedFile } from '@/lib/file-storage'
+import { saveFile, saveFileFromUrl, deleteFile, type SavedFile } from '@/lib/file-storage'
 import type { Item, ItemImage, GetItemsParams, GetItemsResponse } from '@/lib/types'
 
 const itemsCol = () => adminDb.collection('items')
@@ -17,23 +17,101 @@ export async function checkItemIdExists(itemId: string): Promise<boolean> {
   return !snapshot.empty
 }
 
-export async function createItem(formData: FormData) {
-  try {
-    const itemId = formData.get('itemId') as string
-    const exists = await checkItemIdExists(itemId)
-    if (exists) {
-      return { error: 'Item ID already exists' }
-    }
+export interface CreateItemData {
+  itemId: string
+  name: string
+  notes?: string | null
+  purchasePrice?: string | null
+  acquisitionDate?: string | null
+  locationId?: string | null
+  tags?: string[]
+  imageFiles?: File[]
+  imageUrls?: string[]
+}
 
-    const savedFiles: SavedFile[] = []
-    const images = formData.getAll('images') as File[]
-    for (const image of images) {
+export async function createItemFromData(data: CreateItemData) {
+  const exists = await checkItemIdExists(data.itemId)
+  if (exists) {
+    return { error: 'Item ID already exists' }
+  }
+
+  const savedFiles: SavedFile[] = []
+  if (data.imageFiles) {
+    for (const image of data.imageFiles) {
       if (image.size > 0) {
         const savedFile = await saveFile(image)
         savedFiles.push(savedFile)
       }
     }
+  }
+  if (data.imageUrls) {
+    for (const url of data.imageUrls) {
+      const savedFile = await saveFileFromUrl(url)
+      savedFiles.push(savedFile)
+    }
+  }
 
+  const now = new Date().toISOString()
+  const itemRef = itemsCol().doc()
+
+  const imageRecords: ItemImage[] = savedFiles.map((file, idx) => ({
+    id: `${itemRef.id}_img_${idx}`,
+    itemId: itemRef.id,
+    filename: file.filename,
+    storedFilename: file.storedFilename,
+    thumbnailFilename: file.thumbnailFilename,
+    publicUrl: file.publicUrl,
+    thumbnailUrl: file.thumbnailUrl,
+    mimeType: file.mimeType,
+    size: file.size,
+    createdAt: now,
+    deleted: false,
+    deletedAt: null,
+  }))
+
+  let location = null
+  if (data.locationId) {
+    const locDoc = await locationsCol().doc(data.locationId).get()
+    if (locDoc.exists) {
+      location = { id: locDoc.id, ...locDoc.data() } as unknown as import('@/lib/types').Location
+    }
+  }
+
+  const itemData: Omit<Item, 'id'> = {
+    itemId: data.itemId.toLowerCase(),
+    name: data.name,
+    notes: data.notes || null,
+    purchasePrice: data.purchasePrice || null,
+    acquisitionDate: data.acquisitionDate || null,
+    locationId: data.locationId || null,
+    tags: data.tags ?? [],
+    images: imageRecords,
+    location,
+    createdAt: now,
+    updatedAt: now,
+    deleted: false,
+    deletedAt: null,
+    ai: null,
+  }
+
+  await itemRef.set(itemData)
+  const createdItem = { id: itemRef.id, ...itemData } as Item
+
+  try {
+    const ai = await buildItemAiData(createdItem)
+    if (ai) {
+      await itemRef.update({ ai })
+      createdItem.ai = ai
+    }
+  } catch (error) {
+    console.error('Failed to generate AI data for created item:', error)
+  }
+
+  return { item: createdItem }
+}
+
+export async function createItem(formData: FormData) {
+  try {
     const tags: string[] = []
     let i = 0
     while (formData.has(`tags[${i}]`)) {
@@ -41,85 +119,118 @@ export async function createItem(formData: FormData) {
       i++
     }
 
-    const purchasePrice = formData.get('purchasePrice') as string | null
-    const acquisitionDate = formData.get('acquisitionDate') as string | null
-    const locationId = formData.get('locationId') as string | null
-
-    const now = new Date().toISOString()
-    const itemRef = itemsCol().doc()
-
-    const imageRecords: ItemImage[] = savedFiles.map((file, idx) => ({
-      id: `${itemRef.id}_img_${idx}`,
-      itemId: itemRef.id,
-      filename: file.filename,
-      storedFilename: file.storedFilename,
-      thumbnailFilename: file.thumbnailFilename,
-      publicUrl: file.publicUrl,
-      thumbnailUrl: file.thumbnailUrl,
-      mimeType: file.mimeType,
-      size: file.size,
-      createdAt: now,
-      deleted: false,
-      deletedAt: null,
-    }))
-
-    // Get location data if locationId provided
-    let location = null
-    if (locationId) {
-      const locDoc = await locationsCol().doc(locationId).get()
-      if (locDoc.exists) {
-        location = { id: locDoc.id, ...locDoc.data() } as unknown as import('@/lib/types').Location
-      }
-    }
-
-    const itemData: Omit<Item, 'id'> = {
-      itemId: itemId.toLowerCase(),
+    return await createItemFromData({
+      itemId: formData.get('itemId') as string,
       name: formData.get('name') as string,
-      notes: (formData.get('notes') as string) || null,
-      purchasePrice: purchasePrice || null,
-      acquisitionDate: acquisitionDate || null,
-      locationId: locationId || null,
+      notes: formData.get('notes') as string | null,
+      purchasePrice: formData.get('purchasePrice') as string | null,
+      acquisitionDate: formData.get('acquisitionDate') as string | null,
+      locationId: formData.get('locationId') as string | null,
       tags,
-      images: imageRecords,
-      location,
-      createdAt: now,
-      updatedAt: now,
-      deleted: false,
-      deletedAt: null,
-      ai: null,
-    }
-
-    await itemRef.set(itemData)
-    const createdItem = { id: itemRef.id, ...itemData } as Item
-
-    try {
-      const ai = await buildItemAiData(createdItem)
-      if (ai) {
-        await itemRef.update({ ai })
-        createdItem.ai = ai
-      }
-    } catch (error) {
-      console.error('Failed to generate AI data for created item:', error)
-    }
-
-    return { item: createdItem }
+      imageFiles: (formData.getAll('images') as File[]),
+    })
   } catch (error) {
     console.error('Failed to create item:', error)
     return { error: 'Failed to create item' }
   }
 }
 
-export async function updateItem(id: string, formData: FormData) {
-  try {
-    const savedFiles: SavedFile[] = []
-    const images = formData.getAll('images') as File[]
-    for (const image of images) {
+export interface UpdateItemData {
+  itemId?: string
+  name?: string
+  notes?: string | null
+  purchasePrice?: string | null
+  acquisitionDate?: string | null
+  locationId?: string | null
+  tags?: string[]
+  imageFiles?: File[]
+  imageUrls?: string[]
+}
+
+export async function updateItemFromData(id: string, data: UpdateItemData) {
+  const savedFiles: SavedFile[] = []
+  if (data.imageFiles) {
+    for (const image of data.imageFiles) {
       if (image.size > 0) {
         const savedFile = await saveFile(image)
         savedFiles.push(savedFile)
       }
     }
+  }
+  if (data.imageUrls) {
+    for (const url of data.imageUrls) {
+      const savedFile = await saveFileFromUrl(url)
+      savedFiles.push(savedFile)
+    }
+  }
 
+  const now = new Date().toISOString()
+  const itemRef = itemsCol().doc(id)
+  const existingDoc = await itemRef.get()
+  if (!existingDoc.exists) {
+    return { error: 'Item not found' }
+  }
+
+  const existingData = existingDoc.data() as Omit<Item, 'id'>
+  const existingImages = (existingData.images || []).filter(img => !img.deleted)
+  const shouldRefreshAi = savedFiles.length > 0 || !existingData.ai
+
+  const newImageRecords: ItemImage[] = savedFiles.map((file, idx) => ({
+    id: `${id}_img_${Date.now()}_${idx}`,
+    itemId: id,
+    filename: file.filename,
+    storedFilename: file.storedFilename,
+    thumbnailFilename: file.thumbnailFilename,
+    publicUrl: file.publicUrl,
+    thumbnailUrl: file.thumbnailUrl,
+    mimeType: file.mimeType,
+    size: file.size,
+    createdAt: now,
+    deleted: false,
+    deletedAt: null,
+  }))
+
+  let location = null
+  const locationId = data.locationId !== undefined ? data.locationId : existingData.locationId
+  if (locationId) {
+    const locDoc = await locationsCol().doc(locationId).get()
+    if (locDoc.exists) {
+      location = { id: locDoc.id, ...locDoc.data() } as unknown as import('@/lib/types').Location
+    }
+  }
+
+  const updateData: Partial<Item> = {
+    ...(data.itemId !== undefined && { itemId: data.itemId.toLowerCase() }),
+    ...(data.name !== undefined && { name: data.name }),
+    ...(data.notes !== undefined && { notes: data.notes || null }),
+    ...(data.purchasePrice !== undefined && { purchasePrice: data.purchasePrice || null }),
+    ...(data.acquisitionDate !== undefined && { acquisitionDate: data.acquisitionDate || null }),
+    ...(data.locationId !== undefined && { locationId: data.locationId || null }),
+    ...(data.tags !== undefined && { tags: data.tags }),
+    images: [...existingImages, ...newImageRecords],
+    location,
+    updatedAt: now,
+  }
+
+  await itemRef.update(updateData)
+  const updatedDoc = await itemRef.get()
+  const updatedItem = { id: updatedDoc.id, ...updatedDoc.data() } as Item
+
+  if (shouldRefreshAi) {
+    try {
+      const ai = await buildItemAiData(updatedItem)
+      await itemRef.update({ ai })
+      updatedItem.ai = ai
+    } catch (error) {
+      console.error('Failed to refresh AI data for updated item:', error)
+    }
+  }
+
+  return { item: updatedItem }
+}
+
+export async function updateItem(id: string, formData: FormData) {
+  try {
     const tags: string[] = []
     let i = 0
     while (formData.has(`tags[${i}]`)) {
@@ -127,72 +238,16 @@ export async function updateItem(id: string, formData: FormData) {
       i++
     }
 
-    const purchasePrice = formData.get('purchasePrice') as string | null
-    const acquisitionDate = formData.get('acquisitionDate') as string | null
-    const locationId = formData.get('locationId') as string | null
-
-    const now = new Date().toISOString()
-    const itemRef = itemsCol().doc(id)
-    const existingDoc = await itemRef.get()
-    if (!existingDoc.exists) {
-      return { error: 'Item not found' }
-    }
-
-    const existingData = existingDoc.data() as Omit<Item, 'id'>
-    const existingImages = (existingData.images || []).filter(img => !img.deleted)
-    const shouldRefreshAi = savedFiles.length > 0 || !existingData.ai
-
-    const newImageRecords: ItemImage[] = savedFiles.map((file, idx) => ({
-      id: `${id}_img_${Date.now()}_${idx}`,
-      itemId: id,
-      filename: file.filename,
-      storedFilename: file.storedFilename,
-      thumbnailFilename: file.thumbnailFilename,
-      publicUrl: file.publicUrl,
-      thumbnailUrl: file.thumbnailUrl,
-      mimeType: file.mimeType,
-      size: file.size,
-      createdAt: now,
-      deleted: false,
-      deletedAt: null,
-    }))
-
-    let location = null
-    if (locationId) {
-      const locDoc = await locationsCol().doc(locationId).get()
-      if (locDoc.exists) {
-        location = { id: locDoc.id, ...locDoc.data() } as unknown as import('@/lib/types').Location
-      }
-    }
-
-    const updateData: Partial<Item> = {
-      itemId: (formData.get('itemId') as string).toLowerCase(),
+    return await updateItemFromData(id, {
+      itemId: formData.get('itemId') as string,
       name: formData.get('name') as string,
-      notes: (formData.get('notes') as string) || null,
-      purchasePrice: purchasePrice || null,
-      acquisitionDate: acquisitionDate || null,
-      locationId: locationId || null,
+      notes: formData.get('notes') as string | null,
+      purchasePrice: formData.get('purchasePrice') as string | null,
+      acquisitionDate: formData.get('acquisitionDate') as string | null,
+      locationId: formData.get('locationId') as string | null,
       tags,
-      images: [...existingImages, ...newImageRecords],
-      location,
-      updatedAt: now,
-    }
-
-    await itemRef.update(updateData)
-    const updatedDoc = await itemRef.get()
-    const updatedItem = { id: updatedDoc.id, ...updatedDoc.data() } as Item
-
-    if (shouldRefreshAi) {
-      try {
-        const ai = await buildItemAiData(updatedItem)
-        await itemRef.update({ ai })
-        updatedItem.ai = ai
-      } catch (error) {
-        console.error('Failed to refresh AI data for updated item:', error)
-      }
-    }
-
-    return { item: updatedItem }
+      imageFiles: (formData.getAll('images') as File[]),
+    })
   } catch (error) {
     console.error('Failed to update item:', error)
     return { error: 'Failed to update item' }
@@ -212,16 +267,33 @@ function textFilter(items: Item[], search: string): Item[] {
   )
 }
 
+function isMetadataFallbackItem(item: Item) {
+  return item.ai?.analysis?.model === 'metadata-fallback'
+}
+
 async function semanticRank(items: Item[], query: string): Promise<Item[]> {
   const queryEmbedding = await generateSemanticQueryEmbedding(query)
   return items
     .map(item => {
       const vector = item.ai?.imageEmbedding?.vector
       if (!vector?.length) return null
-      return { item, score: cosineSimilarity(queryEmbedding, vector) }
+      return {
+        item,
+        score: cosineSimilarity(queryEmbedding, vector),
+        isMetadataFallback: isMetadataFallbackItem(item),
+      }
     })
-    .filter((entry): entry is { item: Item; score: number } => entry !== null)
-    .sort((left, right) => right.score - left.score)
+    .filter(
+      (entry): entry is { item: Item; score: number; isMetadataFallback: boolean } => entry !== null
+    )
+    .sort((left, right) => {
+      // Fallback entries are text-derived embeddings for corrupt images.
+      // Keep them searchable, but rank real image-backed matches ahead of them.
+      if (left.isMetadataFallback !== right.isMetadataFallback) {
+        return left.isMetadataFallback ? 1 : -1
+      }
+      return right.score - left.score
+    })
     .map(entry => entry.item)
 }
 

@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  serverExternalPackages: ["sharp"],
+  serverExternalPackages: ["sharp", "@modelcontextprotocol/sdk"],
 };
 
 export default nextConfig;
