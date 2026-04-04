@@ -3,7 +3,9 @@
 import { adminDb } from '@/lib/firebase/admin'
 import type { Item } from '@/lib/types'
 
-export interface InventeringSession {
+const SESSIONS_COLLECTION = 'inventering_sessions'
+
+export interface StocktakingSession {
   id: string
   locationId: string
   locationName: string
@@ -14,7 +16,7 @@ export interface InventeringSession {
   results: Record<string, 'found' | 'missing'>
 }
 
-export async function startInventering(locationId: string): Promise<{ session?: InventeringSession; error?: string }> {
+export async function startStocktaking(locationId: string): Promise<{ session?: StocktakingSession; error?: string }> {
   try {
     const locDoc = await adminDb.collection('locations').doc(locationId).get()
     if (!locDoc.exists) return { error: 'Location not found' }
@@ -28,8 +30,8 @@ export async function startInventering(locationId: string): Promise<{ session?: 
       .get()
 
     const now = new Date().toISOString()
-    const ref = adminDb.collection('inventering_sessions').doc()
-    const session: InventeringSession = {
+    const ref = adminDb.collection(SESSIONS_COLLECTION).doc()
+    const session: StocktakingSession = {
       id: ref.id,
       locationId,
       locationName: locData.name,
@@ -43,12 +45,12 @@ export async function startInventering(locationId: string): Promise<{ session?: 
     await ref.set(session)
     return { session }
   } catch (error) {
-    console.error('Failed to start inventering:', error)
-    return { error: 'Failed to start inventering' }
+    console.error('Failed to start stocktaking:', error)
+    return { error: 'Failed to start stocktaking' }
   }
 }
 
-export async function getInventeringItems(locationId: string): Promise<Item[]> {
+export async function getStocktakingItems(locationId: string): Promise<Item[]> {
   const snapshot = await adminDb.collection('items')
     .where('locationId', '==', locationId)
     .where('deleted', '==', false)
@@ -69,11 +71,11 @@ export async function markItem(
   status: 'found' | 'missing'
 ): Promise<{ error?: string }> {
   try {
-    const ref = adminDb.collection('inventering_sessions').doc(sessionId)
+    const ref = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId)
     const doc = await ref.get()
     if (!doc.exists) return { error: 'Session not found' }
 
-    const data = doc.data() as InventeringSession
+    const data = doc.data() as StocktakingSession
     const results = { ...data.results, [itemId]: status }
     const checkedItems = Object.keys(results).length
 
@@ -95,22 +97,22 @@ export async function markItem(
   }
 }
 
-export async function completeInventering(sessionId: string): Promise<{ error?: string }> {
+export async function completeStocktaking(sessionId: string): Promise<{ error?: string }> {
   try {
-    const ref = adminDb.collection('inventering_sessions').doc(sessionId)
+    const ref = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId)
     await ref.update({ completedAt: new Date().toISOString() })
     return {}
   } catch (error) {
-    console.error('Failed to complete inventering:', error)
+    console.error('Failed to complete stocktaking:', error)
     return { error: 'Failed to complete' }
   }
 }
 
-export async function getInventeringSession(sessionId: string): Promise<{ session?: InventeringSession; error?: string }> {
+export async function getStocktakingSession(sessionId: string): Promise<{ session?: StocktakingSession; error?: string }> {
   try {
-    const doc = await adminDb.collection('inventering_sessions').doc(sessionId).get()
+    const doc = await adminDb.collection(SESSIONS_COLLECTION).doc(sessionId).get()
     if (!doc.exists) return { error: 'Session not found' }
-    return { session: { id: doc.id, ...doc.data() } as InventeringSession }
+    return { session: { id: doc.id, ...doc.data() } as StocktakingSession }
   } catch (error) {
     console.error('Failed to get session:', error)
     return { error: 'Failed to get session' }

@@ -19,7 +19,7 @@ export function NavBar() {
     { href: '/', label: 'Home', icon: Home },
     { href: '/quick-add', label: 'Quick Add', icon: Camera },
     { href: '/locations', label: 'Locations', icon: MapPin },
-    { href: '/inventering', label: 'Inventering', icon: ClipboardCheck },
+    { href: '/stocktaking', label: 'Stocktaking', icon: ClipboardCheck },
   ]
 
   const handleSignOut = async () => {
