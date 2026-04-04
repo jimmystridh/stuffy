@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Loader2, Sparkles, Trash2 } from 'lucide-react'
-import { deleteItem, getItemByItemId, refreshItemAi } from '@/app/actions/items'
+import { getItemByItemId, refreshItemAi, removeItem } from '@/app/actions/items'
 import type { Item } from '@/lib/types'
 
 export function Page({ params }: { params: { id: string } }) {
@@ -17,6 +17,7 @@ export function Page({ params }: { params: { id: string } }) {
   const [item, setItem] = useState<Item | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshingAi, setRefreshingAi] = useState(false)
+  const [removing, setRemoving] = useState(false)
 
   useEffect(() => {
     const loadItem = async () => {
@@ -34,15 +35,18 @@ export function Page({ params }: { params: { id: string } }) {
     loadItem()
   }, [params.id])
 
-  const handleDelete = async () => {
+  const handleRemove = async () => {
     if (!item) return
+    setRemoving(true)
     try {
-      const result = await deleteItem(item.id)
-      if (!result.error) {
-        router.push('/')
+      const result = await removeItem(item.id)
+      if ('success' in result) {
+        router.push('/removed')
       }
     } catch (error) {
-      console.error('Delete error:', error)
+      console.error('Remove error:', error)
+    } finally {
+      setRemoving(false)
     }
   }
 
@@ -80,23 +84,22 @@ export function Page({ params }: { params: { id: string } }) {
           </Link>
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="destructive">
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete
+              <Button variant="destructive" disabled={removing}>
+                {removing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                Remove
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                <AlertDialogTitle>Remove this item?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This action cannot be undone. This will permanently delete the item
-                  and all associated images.
+                  This removes the item from active inventory and moves it into the soft-delete Removed trashcan.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
-                  Delete
+                <AlertDialogAction onClick={handleRemove} className="bg-red-600 hover:bg-red-700">
+                  Remove
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>

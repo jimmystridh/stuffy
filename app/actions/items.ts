@@ -3,6 +3,7 @@
 import { adminDb } from '@/lib/firebase/admin'
 import { buildItemAiData, cosineSimilarity, generateSemanticQueryEmbedding } from '@/lib/ai/item-intelligence'
 import { saveFile, saveFileFromUrl, deleteFile, type SavedFile } from '@/lib/file-storage'
+import { isAllLocationsFilter, isNoLocationFilter } from '@/lib/location-filters'
 import type { Item, ItemImage, GetItemsParams, GetItemsResponse } from '@/lib/types'
 
 const itemsCol = () => adminDb.collection('items')
@@ -254,17 +255,49 @@ export async function updateItem(id: string, formData: FormData) {
   }
 }
 
+function getTextMatchScore(item: Item, searchLower: string) {
+  const itemId = item.itemId.toLowerCase()
+  const name = item.name.toLowerCase()
+  const notes = (item.notes || '').toLowerCase()
+  const tags = item.tags.map(tag => tag.toLowerCase())
+  const aiSearchText = (item.ai?.searchText || '').toLowerCase()
+
+  if (itemId === searchLower) return 900
+  if (itemId.startsWith(searchLower)) return 800
+  if (itemId.includes(searchLower)) return 700
+  if (name === searchLower) return 600
+  if (name.startsWith(searchLower)) return 500
+  if (tags.some(tag => tag === searchLower)) return 450
+  if (name.includes(searchLower)) return 400
+  if (notes.includes(searchLower)) return 300
+  if (tags.some(tag => tag.includes(searchLower))) return 250
+  if (aiSearchText.includes(searchLower)) return 200
+
+  return -1
+}
+
 function textFilter(items: Item[], search: string): Item[] {
-  const searchLower = search.toLowerCase()
-  return items.filter(item =>
-    [
-      item.name,
-      item.itemId,
-      item.notes || '',
-      item.tags.join(' '),
-      item.ai?.searchText || '',
-    ].some(value => value.toLowerCase().includes(searchLower))
-  )
+  const searchLower = search.trim().toLowerCase()
+
+  return items
+    .map(item => ({
+      item,
+      score: getTextMatchScore(item, searchLower),
+    }))
+    .filter((entry): entry is { item: Item; score: number } => entry.score >= 0)
+    .sort((left, right) => {
+      if (left.score !== right.score) {
+        return right.score - left.score
+      }
+
+      const itemIdComparison = left.item.itemId.localeCompare(right.item.itemId)
+      if (itemIdComparison !== 0) {
+        return itemIdComparison
+      }
+
+      return left.item.name.localeCompare(right.item.name)
+    })
+    .map(entry => entry.item)
 }
 
 function isMetadataFallbackItem(item: Item) {
@@ -306,7 +339,9 @@ async function getFilteredItems({
 }: GetItemsParams = {}): Promise<Item[]> {
   let query = itemsCol().where('deleted', '==', false) as FirebaseFirestore.Query
 
-  if (location && location !== 'All') {
+  if (isNoLocationFilter(location)) {
+    query = query.where('locationId', '==', null)
+  } else if (!isAllLocationsFilter(location)) {
     query = query.where('location.name', '==', location)
   }
 
@@ -328,15 +363,14 @@ async function getFilteredItems({
         items = textFilter(items, search)
       }
     } else {
-      // Auto mode: run text filter first, then try semantic ranking on the
-      // full set. Merge by showing semantic matches first, then text-only
-      // matches that weren't in the semantic results.
+      // Auto mode: start with exact/strong text matches so item IDs and names
+      // are easy to find, then append semantic-only matches as a fallback.
       const textMatches = textFilter(items, search)
       try {
         const semanticMatches = await semanticRank(items, search)
-        const semanticIds = new Set(semanticMatches.map(i => i.id))
-        const textOnlyMatches = textMatches.filter(i => !semanticIds.has(i.id))
-        items = [...semanticMatches, ...textOnlyMatches]
+        const textIds = new Set(textMatches.map(item => item.id))
+        const semanticOnlyMatches = semanticMatches.filter(item => !textIds.has(item.id))
+        items = [...textMatches, ...semanticOnlyMatches]
       } catch {
         // Semantic failed, just use text results
         items = textMatches
@@ -392,6 +426,31 @@ export async function getItems({
   }
 }
 
+export async function getRemovedItems() {
+  try {
+    const snapshot = await itemsCol()
+      .where('deleted', '==', true)
+      .get()
+
+    const items = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }) as Item)
+      .map(item => ({
+        ...item,
+        images: (item.images || []).filter(img => !img.deleted),
+      }))
+      .sort((left, right) => {
+        const leftDeletedAt = left.deletedAt || ''
+        const rightDeletedAt = right.deletedAt || ''
+        return rightDeletedAt.localeCompare(leftDeletedAt)
+      })
+
+    return { items }
+  } catch (error) {
+    console.error('Failed to fetch removed items:', error)
+    return { items: [], error: 'Failed to fetch removed items' }
+  }
+}
+
 export async function getItemById(id: string) {
   try {
     const doc = await itemsCol().doc(id).get()
@@ -432,33 +491,54 @@ export async function getItemByItemId(itemId: string) {
   }
 }
 
-export async function deleteItem(id: string) {
+async function setItemRemovedState(id: string, removed: boolean) {
+  const now = new Date().toISOString()
+  const itemRef = itemsCol().doc(id)
+  const doc = await itemRef.get()
+  if (!doc.exists) {
+    return { error: 'Item not found' }
+  }
+
+  await itemRef.update({
+    deleted: removed,
+    deletedAt: removed ? now : null,
+    updatedAt: now,
+  })
+
+  const updatedDoc = await itemRef.get()
+  const item = { id: updatedDoc.id, ...updatedDoc.data() } as Item
+  item.images = (item.images || []).filter(img => !img.deleted)
+  return { item }
+}
+
+export async function removeItem(id: string) {
   try {
-    const now = new Date().toISOString()
-    const itemRef = itemsCol().doc(id)
-    const doc = await itemRef.get()
-    if (!doc.exists) {
-      return { error: 'Item not found' }
+    const result = await setItemRemovedState(id, true)
+    if (result.error) {
+      return result
     }
-
-    const data = doc.data() as Omit<Item, 'id'>
-    const updatedImages = (data.images || []).map(img => ({
-      ...img,
-      deleted: true,
-      deletedAt: now,
-    }))
-
-    await itemRef.update({
-      deleted: true,
-      deletedAt: now,
-      images: updatedImages,
-    })
-
     return { success: true }
   } catch (error) {
-    console.error('Failed to delete item:', error)
-    return { error: 'Failed to delete item' }
+    console.error('Failed to remove item:', error)
+    return { error: 'Failed to remove item' }
   }
+}
+
+export async function restoreItem(id: string) {
+  try {
+    const result = await setItemRemovedState(id, false)
+    if (result.error) {
+      return result
+    }
+    return { success: true, item: result.item }
+  } catch (error) {
+    console.error('Failed to restore item:', error)
+    return { error: 'Failed to restore item' }
+  }
+}
+
+export async function deleteItem(id: string) {
+  return removeItem(id)
 }
 
 export async function deleteItemImage(itemId: string, imageId: string) {

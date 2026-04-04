@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
-import { Loader2, Sparkles } from 'lucide-react'
-import { getItemById, getItems, refreshItemAi } from '@/app/actions/items'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
+import { Loader2, Sparkles, Trash2 } from 'lucide-react'
+import { getItemById, getItems, refreshItemAi, removeItem } from '@/app/actions/items'
 import { getLocations } from '@/app/actions/locations'
 import { ItemHeader } from './item/components/ItemHeader'
 import { FormFields } from './item/components/FormFields'
@@ -19,6 +20,7 @@ import { useItemNavigation } from './item/hooks/useItemNavigation'
 import type { Item, Location } from '@/lib/types'
 
 export function Page({ params }: { params: { id: string } }) {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const isNewItem = params.id === 'new'
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -27,6 +29,7 @@ export function Page({ params }: { params: { id: string } }) {
   const [totalItems, setTotalItems] = useState(0)
   const [itemAi, setItemAi] = useState<Item['ai']>(null)
   const [isRefreshingAi, setIsRefreshingAi] = useState(false)
+  const [isRemoving, setIsRemoving] = useState(false)
 
   const {
     item,
@@ -127,6 +130,22 @@ export function Page({ params }: { params: { id: string } }) {
     }
   }
 
+  const handleRemove = async () => {
+    if (isNewItem) return
+
+    setIsRemoving(true)
+    try {
+      const result = await removeItem(params.id)
+      if ('success' in result) {
+        router.push('/removed')
+      }
+    } catch (error) {
+      console.error('Failed to remove item:', error)
+    } finally {
+      setIsRemoving(false)
+    }
+  }
+
   return (
     <div className="container mx-auto p-4">
       <ItemHeader
@@ -136,6 +155,33 @@ export function Page({ params }: { params: { id: string } }) {
         onNavigateBack={navigateBack}
         onNavigateAdjacent={navigateToAdjacent}
       />
+
+      {!isNewItem && (
+        <div className="mb-6 flex justify-end">
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button type="button" variant="destructive" disabled={isRemoving}>
+                {isRemoving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                Remove
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove this item?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This removes the item from active inventory and moves it into the soft-delete Removed trashcan.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleRemove} className="bg-red-600 hover:bg-red-700">
+                  Remove
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 p-3 bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-200 rounded-md">

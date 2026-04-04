@@ -66,6 +66,8 @@ export interface Item {
   ai: ItemAiData | null
 }
 
+export type StocktakingResultStatus = 'found' | 'missing' | 'removed'
+
 export type SearchMode = 'auto' | 'text' | 'ai'
 
 export interface GetItemsParams {

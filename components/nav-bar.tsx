@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Camera, MapPin, ClipboardCheck, LogOut } from 'lucide-react'
+import { Home, Camera, MapPin, ClipboardCheck, Archive, LogOut } from 'lucide-react'
 import { Button } from './ui/button'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/firebase/auth-context'
@@ -18,6 +18,7 @@ export function NavBar() {
     { href: '/quick-add', label: 'Quick Add', icon: Camera },
     { href: '/locations', label: 'Locations', icon: MapPin },
     { href: '/stocktaking', label: 'Stocktaking', icon: ClipboardCheck },
+    { href: '/removed', label: 'Removed', icon: Archive },
   ]
 
   const handleSignOut = async () => {

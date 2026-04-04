@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo } from 'react'
+import { prepareUploadImages } from '@/lib/client/prepare-upload-image'
 import type { ItemImage } from '@/lib/types'
 
 export const useImageHandling = (images: (File | ItemImage)[]) => {
@@ -23,10 +24,15 @@ export const useImageHandling = (images: (File | ItemImage)[]) => {
     }
   }, [imageUrls])
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, onUpdate: (newImages: (File | ItemImage)[]) => void) => {
+  const handleImageUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    onUpdate: (newImages: (File | ItemImage)[]) => void
+  ) => {
     if (e.target.files && e.target.files.length > 0) {
       const files = Array.from(e.target.files)
-      onUpdate([...images, ...files])
+      const preparedFiles = await prepareUploadImages(files)
+      onUpdate([...images, ...preparedFiles])
+      e.target.value = ''
     }
   }
 

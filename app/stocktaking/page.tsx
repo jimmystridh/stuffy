@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { Check, X, ArrowLeft, ArrowRight, List, Play, CheckCircle2 } from 'lucide-react'
+import { Check, X, ArrowLeft, ArrowRight, List, Play, CheckCircle2, Trash2 } from 'lucide-react'
 import { getLocations } from '@/app/actions/locations'
 import {
   startStocktaking,
@@ -16,7 +16,34 @@ import {
   completeStocktaking,
   type StocktakingSession,
 } from '@/app/actions/stocktaking'
-import type { Location, Item } from '@/lib/types'
+import type { Location, Item, StocktakingResultStatus } from '@/lib/types'
+
+function getStatusCardClass(status?: StocktakingResultStatus) {
+  if (status === 'found') {
+    return 'border-green-300 bg-green-50 dark:bg-green-950/30'
+  }
+  if (status === 'missing') {
+    return 'border-red-300 bg-red-50 dark:bg-red-950/30'
+  }
+  if (status === 'removed') {
+    return 'border-amber-300 bg-amber-50 dark:bg-amber-950/30'
+  }
+  return ''
+}
+
+function getStatusButtonClass(status: StocktakingResultStatus, selectedStatus?: StocktakingResultStatus) {
+  if (status !== selectedStatus) {
+    return ''
+  }
+
+  if (status === 'found') {
+    return 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300'
+  }
+  if (status === 'missing') {
+    return 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300'
+  }
+  return 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+}
 
 function SessionHeader({
   session,
@@ -73,9 +100,10 @@ export default function StocktakingPage() {
     setLoading(false)
   }
 
-  const handleMark = async (itemId: string, status: 'found' | 'missing') => {
+  const handleMark = async (itemId: string, status: StocktakingResultStatus) => {
     if (!session) return
-    await markItem(session.id, itemId, status)
+    const result = await markItem(session.id, itemId, status)
+    if (result.error) return
     const newResults = { ...session.results, [itemId]: status }
     setSession(prev => prev ? {
       ...prev,
@@ -112,6 +140,7 @@ export default function StocktakingPage() {
   const allChecked = session && items.length > 0 && Object.keys(session.results).length >= items.length
   const foundCount = session ? Object.values(session.results).filter(s => s === 'found').length : 0
   const missingCount = session ? Object.values(session.results).filter(s => s === 'missing').length : 0
+  const removedCount = session ? Object.values(session.results).filter(s => s === 'removed').length : 0
 
   if (!session) {
     return (
@@ -124,7 +153,7 @@ export default function StocktakingPage() {
           <CardContent className="space-y-4">
             <p className="text-muted-foreground">
               Select a location for stocktaking. Go through each item and confirm whether it&apos;s still there.
-              Items marked &quot;No&quot; will have their location cleared.
+              Missing items will have their location cleared, and Removed items will move into the soft-delete Removed trashcan.
             </p>
             <Select value={selectedLocationId || ''} onValueChange={setSelectedLocationId}>
               <SelectTrigger>
@@ -157,7 +186,7 @@ export default function StocktakingPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-3 gap-4 text-center">
+            <div className="grid grid-cols-2 gap-4 text-center sm:grid-cols-4">
               <div>
                 <p className="text-2xl font-bold">{items.length}</p>
                 <p className="text-sm text-muted-foreground">Total</p>
@@ -169,6 +198,10 @@ export default function StocktakingPage() {
               <div>
                 <p className="text-2xl font-bold text-red-600">{missingCount}</p>
                 <p className="text-sm text-muted-foreground">Missing</p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-amber-600">{removedCount}</p>
+                <p className="text-sm text-muted-foreground">Removed</p>
               </div>
             </div>
             {!session.completedAt && (
@@ -224,22 +257,30 @@ export default function StocktakingPage() {
           </CardContent>
         </Card>
 
-        <div className="flex gap-3 mt-4">
+        <div className="grid grid-cols-3 gap-3 mt-4">
           <Button
-            variant={status === 'missing' ? 'destructive' : 'outline'}
+            variant="outline"
             onClick={() => handleMark(item.id, 'missing')}
-            className="flex-1 h-14 text-lg"
+            className={`h-14 text-base ${getStatusButtonClass('missing', status)}`}
           >
             <X className="h-5 w-5 mr-2" />
-            No
+            Missing
           </Button>
           <Button
-            variant={status === 'found' ? 'default' : 'outline'}
+            variant="outline"
+            onClick={() => handleMark(item.id, 'removed')}
+            className={`h-14 text-base ${getStatusButtonClass('removed', status)}`}
+          >
+            <Trash2 className="h-5 w-5 mr-2" />
+            Removed
+          </Button>
+          <Button
+            variant="outline"
             onClick={() => handleMark(item.id, 'found')}
-            className="flex-1 h-14 text-lg"
+            className={`h-14 text-base ${getStatusButtonClass('found', status)}`}
           >
             <Check className="h-5 w-5 mr-2" />
-            Yes
+            Found
           </Button>
         </div>
 
@@ -275,7 +316,7 @@ export default function StocktakingPage() {
             <div>
               <p className="font-semibold text-green-700 dark:text-green-300">All items checked!</p>
               <p className="text-sm text-green-600 dark:text-green-400">
-                {foundCount} found, {missingCount} missing
+                {foundCount} found, {missingCount} missing, {removedCount} removed
               </p>
             </div>
             <Button onClick={handleComplete}>Finish</Button>
@@ -289,11 +330,7 @@ export default function StocktakingPage() {
           return (
             <Card
               key={item.id}
-              className={
-                status === 'found' ? 'border-green-300 bg-green-50 dark:bg-green-950/30' :
-                status === 'missing' ? 'border-red-300 bg-red-50 dark:bg-red-950/30' :
-                ''
-              }
+              className={getStatusCardClass(status)}
             >
               <CardContent className="p-3 flex items-center gap-3">
                 {item.images[0]?.thumbnailUrl ? (
@@ -317,16 +354,29 @@ export default function StocktakingPage() {
 
                 <div className="flex gap-1 flex-shrink-0">
                   <Button
-                    variant={status === 'missing' ? 'destructive' : 'outline'}
+                    variant="outline"
                     size="sm"
                     onClick={() => handleMark(item.id, 'missing')}
+                    className={getStatusButtonClass('missing', status)}
+                    aria-label={`Mark ${item.name} as missing`}
                   >
                     <X className="h-4 w-4" />
                   </Button>
                   <Button
-                    variant={status === 'found' ? 'default' : 'outline'}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleMark(item.id, 'removed')}
+                    className={getStatusButtonClass('removed', status)}
+                    aria-label={`Mark ${item.name} as removed`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
                     size="sm"
                     onClick={() => handleMark(item.id, 'found')}
+                    className={getStatusButtonClass('found', status)}
+                    aria-label={`Mark ${item.name} as found`}
                   >
                     <Check className="h-4 w-4" />
                   </Button>

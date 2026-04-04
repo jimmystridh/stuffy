@@ -1,11 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
+import { NO_LOCATION_FILTER } from '@/lib/location-filters'
 import {
   getItems,
   getItemById,
   getItemByItemId,
   getAllTags,
-  deleteItem,
+  removeItem,
   deleteItemImage,
   refreshItemAi,
   createItemFromData,
@@ -53,7 +54,7 @@ export function registerMcpTools(server: McpServer) {
         search: z.string().optional().describe('Search query for text or semantic search'),
         searchMode: z.enum(['auto', 'text', 'ai']).optional().describe('Search mode: auto (combined), text (keyword), ai (semantic)'),
         tags: z.array(z.string()).optional().describe('Filter by tags'),
-        location: z.string().optional().describe('Filter by location name'),
+        location: z.string().optional().describe(`Filter by location name. Use "${NO_LOCATION_FILTER}" for items without a location`),
         orderByField: z.string().optional().describe('Sort field (default: name)'),
         orderByDirection: z.enum(['asc', 'desc']).optional().describe('Sort direction (default: asc)'),
       },
@@ -182,14 +183,14 @@ export function registerMcpTools(server: McpServer) {
   server.registerTool(
     'delete_item',
     {
-      description: 'Soft-delete an inventory item',
+      description: 'Remove an inventory item into the soft-delete Removed trashcan',
       inputSchema: {
         id: z.string().min(1).describe('Firestore document ID of the item'),
       },
     },
     async ({ id }) => {
-      const result = await deleteItem(id)
-      if (result.error) return errorResult(result.error)
+      const result = await removeItem(id)
+      if ('error' in result) return errorResult(result.error)
       return okResult({ ok: true })
     }
   )
@@ -322,11 +323,11 @@ export function registerMcpTools(server: McpServer) {
   server.registerTool(
     'mark_stocktaking_item',
     {
-      description: 'Mark an item as found or missing during stocktaking. Missing items have their location cleared.',
+      description: 'Mark an item as found, missing, or removed during stocktaking. Missing items have their location cleared. Removed items move into the soft-delete Removed trashcan.',
       inputSchema: {
         sessionId: z.string().min(1).describe('Stocktaking session ID'),
         itemId: z.string().min(1).describe('Firestore document ID of the item'),
-        status: z.enum(['found', 'missing']).describe('Whether the item was found or is missing'),
+        status: z.enum(['found', 'missing', 'removed']).describe('Whether the item was found, is missing, or should be removed'),
       },
     },
     async ({ sessionId, itemId, status }) => {

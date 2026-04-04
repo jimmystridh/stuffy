@@ -1,7 +1,7 @@
 'use server'
 
 import { adminDb } from '@/lib/firebase/admin'
-import type { Item } from '@/lib/types'
+import type { Item, Location, StocktakingResultStatus } from '@/lib/types'
 
 const SESSIONS_COLLECTION = 'inventering_sessions'
 
@@ -13,7 +13,7 @@ export interface StocktakingSession {
   completedAt: string | null
   totalItems: number
   checkedItems: number
-  results: Record<string, 'found' | 'missing'>
+  results: Record<string, StocktakingResultStatus>
 }
 
 export async function startStocktaking(locationId: string): Promise<{ session?: StocktakingSession; error?: string }> {
@@ -68,31 +68,55 @@ export async function getStocktakingItems(locationId: string): Promise<Item[]> {
 export async function markItem(
   sessionId: string,
   itemId: string,
-  status: 'found' | 'missing'
+  status: StocktakingResultStatus
 ): Promise<{ error?: string }> {
   try {
-    const ref = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId)
-    const doc = await ref.get()
-    if (!doc.exists) return { error: 'Session not found' }
+    await adminDb.runTransaction(async transaction => {
+      const sessionRef = adminDb.collection(SESSIONS_COLLECTION).doc(sessionId)
+      const itemRef = adminDb.collection('items').doc(itemId)
+      const sessionDoc = await transaction.get(sessionRef)
+      if (!sessionDoc.exists) {
+        throw new Error('Session not found')
+      }
 
-    const data = doc.data() as StocktakingSession
-    const results = { ...data.results, [itemId]: status }
-    const checkedItems = Object.keys(results).length
+      const itemDoc = await transaction.get(itemRef)
+      if (!itemDoc.exists) {
+        throw new Error('Item not found')
+      }
 
-    await ref.update({ results, checkedItems })
+      const session = sessionDoc.data() as StocktakingSession
+      const results = { ...session.results, [itemId]: status }
+      const checkedItems = Object.keys(results).length
+      const updatedAt = new Date().toISOString()
+      const itemUpdate: Partial<Item> = { updatedAt }
 
-    // If item is missing, remove its location
-    if (status === 'missing') {
-      await adminDb.collection('items').doc(itemId).update({
-        locationId: null,
-        location: null,
-        updatedAt: new Date().toISOString(),
-      })
-    }
+      if (status === 'missing') {
+        itemUpdate.deleted = false
+        itemUpdate.deletedAt = null
+        itemUpdate.locationId = null
+        itemUpdate.location = null
+      } else {
+        const locationDoc = await transaction.get(adminDb.collection('locations').doc(session.locationId))
+        const location = locationDoc.exists
+          ? ({ id: locationDoc.id, ...locationDoc.data() } as Location)
+          : null
+
+        itemUpdate.deleted = status === 'removed'
+        itemUpdate.deletedAt = status === 'removed' ? updatedAt : null
+        itemUpdate.locationId = session.locationId
+        itemUpdate.location = location
+      }
+
+      transaction.update(itemRef, itemUpdate)
+      transaction.update(sessionRef, { results, checkedItems })
+    })
 
     return {}
   } catch (error) {
     console.error('Failed to mark item:', error)
+    if (error instanceof Error && (error.message === 'Session not found' || error.message === 'Item not found')) {
+      return { error: error.message }
+    }
     return { error: 'Failed to mark item' }
   }
 }

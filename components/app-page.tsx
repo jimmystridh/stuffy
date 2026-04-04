@@ -14,6 +14,7 @@ import { ThemeToggle } from '@/components/theme-toggle'
 import { VirtualizedItemCollection } from '@/components/virtualized-item-collection'
 import { getAllTags, getItems } from '@/app/actions/items'
 import { getLocations } from '@/app/actions/locations'
+import { ALL_LOCATIONS_FILTER, NO_LOCATION_FILTER, NO_LOCATION_FILTER_LABEL } from '@/lib/location-filters'
 import type { Item, Location, SearchMode } from '@/lib/types'
 
 const ITEM_BATCH_SIZE = 36
@@ -81,8 +82,8 @@ function mergePageIntoCache(
 }
 
 const SEARCH_MODE_CONFIG: Record<SearchMode, { icon: typeof Search; label: string; placeholder: string }> = {
-  auto: { icon: Zap, label: 'Auto', placeholder: 'Search items (text + AI)...' },
-  text: { icon: Type, label: 'Text', placeholder: 'Search by name, tags, notes...' },
+  auto: { icon: Zap, label: 'Auto', placeholder: 'Search by ID, name, tags, notes, or describe the item...' },
+  text: { icon: Type, label: 'Text', placeholder: 'Search by ID, name, tags, notes...' },
   ai: { icon: Sparkles, label: 'AI', placeholder: 'Describe what you\'re looking for...' },
 }
 
@@ -104,7 +105,7 @@ export function Page() {
   const searchTerm = searchParams.get('q') || ''
   const searchMode = (searchParams.get('mode') as SearchMode) || 'auto'
   const selectedTagsParam = searchParams.get('tags') || ''
-  const selectedLocation = searchParams.get('location') || 'All'
+  const selectedLocation = searchParams.get('location') || ALL_LOCATIONS_FILTER
   const selectedTags = selectedTagsParam ? selectedTagsParam.split(',').filter(Boolean) : []
   const sortBy = searchParams.get('sort') || 'name'
   const sortOrder = (searchParams.get('order') || 'asc') as 'asc' | 'desc'
@@ -387,13 +388,14 @@ export function Page() {
               ) : (
                 <Select
                   value={selectedLocation}
-                  onValueChange={(value) => updateUrlParams({ location: value === 'All' ? null : value })}
+                  onValueChange={(value) => updateUrlParams({ location: value === ALL_LOCATIONS_FILTER ? null : value })}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select location" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="All">All Locations</SelectItem>
+                    <SelectItem value={ALL_LOCATIONS_FILTER}>All Locations</SelectItem>
+                    <SelectItem value={NO_LOCATION_FILTER}>{NO_LOCATION_FILTER_LABEL}</SelectItem>
                     {locations.map((location) => (
                       <SelectItem key={location.id} value={location.name}>
                         {location.name}
