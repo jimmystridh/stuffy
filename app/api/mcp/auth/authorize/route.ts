@@ -38,7 +38,13 @@ export async function GET(request: Request) {
       )
     }
 
-    const sessionToken = await resolveSessionBearerToken({ request })
+    let sessionToken: string | undefined
+    try {
+      sessionToken = await resolveSessionBearerToken({ request })
+    } catch (e) {
+      console.error('[mcp/authorize] session resolution failed:', e)
+    }
+
     if (!sessionToken) {
       const origin = getPublicOrigin(request)
       const publicAuthorizeUrl = getPublicUrl(request, `/api/mcp/auth/authorize${url.search}`)
@@ -57,7 +63,7 @@ export async function GET(request: Request) {
 
     return redirectResponse(buildRedirectUri({ redirectUri, state, code }), 307)
   } catch (error) {
-    console.error('[mcp/authorize] error:', error)
+    console.error('[mcp/authorize] error:', error instanceof Error ? error.stack : error)
     return jsonResponse(
       { error: 'server_error', error_description: 'Failed to authorize OAuth request' },
       { status: 500, headers: { 'Access-Control-Allow-Origin': '*' } }

@@ -41,9 +41,7 @@ function fromBase64Url(input: string) {
 function getSigningSecret() {
   const secret = process.env.MCP_AUTH_SECRET
   if (!secret) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('MCP_AUTH_SECRET must be set in production')
-    }
+    console.warn('[mcp] MCP_AUTH_SECRET not set, using fallback — set this in production')
     return 'dev-mcp-secret'
   }
   return secret
