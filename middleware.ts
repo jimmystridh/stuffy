@@ -8,7 +8,15 @@ export function middleware(request: NextRequest) {
   }
 
   // Allow auth-related routes and static assets
-  const publicPaths = ['/login', '/api/auth', '/_next', '/favicon.ico']
+  const publicPaths = [
+    '/login',
+    '/api/auth',
+    '/_next',
+    '/favicon.ico',
+    '/manifest.webmanifest',
+    '/pwa-icon',
+    '/sw.js',
+  ]
   const isPublicPath = publicPaths.some(path => request.nextUrl.pathname.startsWith(path))
 
   if (isPublicPath) {
@@ -25,5 +33,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest|sw\\.js|pwa-icon).*)'],
 }
