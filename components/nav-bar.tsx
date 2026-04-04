@@ -2,15 +2,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Camera, MapPin, ClipboardCheck, Menu, X, LogOut } from 'lucide-react'
-import { useState } from 'react'
+import { Home, Camera, MapPin, ClipboardCheck, LogOut } from 'lucide-react'
 import { Button } from './ui/button'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/firebase/auth-context'
 
 export function NavBar() {
   const pathname = usePathname()
-  const [isOpen, setIsOpen] = useState(false)
   const { user, signOut } = useAuth()
 
   if (pathname === '/login') return null
@@ -28,37 +26,37 @@ export function NavBar() {
   }
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t dark:border-gray-700 py-2 px-4 md:top-0 md:bottom-auto z-50">
-      <div className="container mx-auto">
-        <button
-          className="md:hidden absolute right-4 top-2"
-          onClick={() => setIsOpen(!isOpen)}
-        >
-          {isOpen ? <X /> : <Menu />}
-        </button>
-
-        <div className={cn(
-          "flex flex-col md:flex-row items-center justify-center gap-4",
-          isOpen ? "block" : "hidden md:flex"
-        )}>
-          {links.map(({ href, label, icon: Icon }) => (
+    <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t dark:border-gray-700 py-1 px-2 md:top-0 md:bottom-auto z-50">
+      <div className="container mx-auto flex items-center justify-around md:justify-center md:gap-4">
+        {links.map(({ href, label, icon: Icon }) => {
+          const active = pathname === href || (href !== '/' && pathname.startsWith(href))
+          return (
             <Link key={href} href={href}>
               <Button
-                variant={pathname === href ? "default" : "ghost"}
-                className="w-full md:w-auto flex items-center gap-2"
+                variant={active ? "default" : "ghost"}
+                size="sm"
+                className={cn(
+                  "flex flex-col md:flex-row items-center gap-0.5 md:gap-2 h-auto py-1.5 px-2 md:px-3",
+                  active ? "" : "text-muted-foreground"
+                )}
               >
-                <Icon className="h-4 w-4" />
-                {label}
+                <Icon className="h-5 w-5 md:h-4 md:w-4" />
+                <span className="text-[10px] md:text-sm">{label}</span>
               </Button>
             </Link>
-          ))}
-          {user && (
-            <Button variant="ghost" onClick={handleSignOut} className="flex items-center gap-2">
-              <LogOut className="h-4 w-4" />
-              Sign Out
-            </Button>
-          )}
-        </div>
+          )
+        })}
+        {user && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleSignOut}
+            className="flex flex-col md:flex-row items-center gap-0.5 md:gap-2 h-auto py-1.5 px-2 md:px-3 text-muted-foreground"
+          >
+            <LogOut className="h-5 w-5 md:h-4 md:w-4" />
+            <span className="text-[10px] md:text-sm">Sign Out</span>
+          </Button>
+        )}
       </div>
     </nav>
   )
