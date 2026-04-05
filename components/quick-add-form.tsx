@@ -202,14 +202,6 @@ export function QuickAddForm() {
     setIsSubmitting(true)
     setMessage(null)
     try {
-      if (trimmedId) {
-        const exists = await checkItemIdExists(trimmedId)
-        if (exists) {
-          setMessage({ type: 'error', text: 'Item ID already exists' })
-          return
-        }
-      }
-
       const formData = new FormData()
       formData.append('itemId', trimmedId)
       formData.append('name', name.trim())

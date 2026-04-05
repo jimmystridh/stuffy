@@ -1,5 +1,6 @@
 'use server'
 
+import { after } from 'next/server'
 import { adminDb } from '@/lib/firebase/admin'
 import { buildItemAiData, cosineSimilarity, generateSemanticQueryEmbedding } from '@/lib/ai/item-intelligence'
 import { saveFile, saveFileFromUrl, deleteFile, type SavedFile } from '@/lib/file-storage'
@@ -86,6 +87,21 @@ function parseUploadedImages(formData: FormData): UploadedImageFile[] {
     }
 
     return parsed
+  })
+}
+
+function scheduleItemAiRefresh(
+  itemRef: FirebaseFirestore.DocumentReference,
+  item: Item,
+  errorContext: string
+) {
+  after(async () => {
+    try {
+      const ai = await buildItemAiData(item)
+      await itemRef.update({ ai })
+    } catch (error) {
+      console.error(errorContext, error)
+    }
   })
 }
 
@@ -185,14 +201,8 @@ export async function createItemFromData(data: CreateItemData) {
   await itemRef.set(itemData)
   const createdItem = { id: itemRef.id, ...itemData } as Item
 
-  try {
-    const ai = await buildItemAiData(createdItem)
-    if (ai) {
-      await itemRef.update({ ai })
-      createdItem.ai = ai
-    }
-  } catch (error) {
-    console.error('Failed to generate AI data for created item:', error)
+  if (createdItem.images.length > 0) {
+    scheduleItemAiRefresh(itemRef, createdItem, 'Failed to generate AI data for created item:')
   }
 
   return { item: createdItem }
