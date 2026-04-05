@@ -52,7 +52,7 @@ export const useItemForm = (isNewItem: boolean) => {
   const handleIdBlur = async (e: React.FocusEvent<HTMLInputElement>) => {
     const itemId = e.target.value.trim()
     if (!itemId) {
-      setIdValidationStatus('invalid')
+      setIdValidationStatus('idle')
       return
     }
 
@@ -67,11 +67,6 @@ export const useItemForm = (isNewItem: boolean) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
-    if (!item.itemId) {
-      setError('Item ID is required')
-      return
-    }
 
     setIsSaving(true)
     setError(null)

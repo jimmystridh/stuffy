@@ -131,7 +131,7 @@ export function Page() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <CardTitle className="text-xl">{item.name}</CardTitle>
-                    <p className="text-sm text-muted-foreground">ID: {item.itemId}</p>
+                    <p className="text-sm text-muted-foreground">ID: {item.itemId || 'No ID'}</p>
                   </div>
                   <Badge variant="outline">Removed</Badge>
                 </div>

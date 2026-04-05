@@ -131,8 +131,8 @@ export function registerMcpTools(server: McpServer) {
     {
       description: 'Create a new inventory item. Images can be attached via URLs (the server fetches and stores them).',
       inputSchema: {
-        itemId: z.string().min(1).describe('Unique item identifier (e.g. "laptop-01")'),
-        name: z.string().min(1).describe('Item name'),
+        itemId: z.string().optional().describe('Optional item identifier (e.g. "laptop-01")'),
+        name: z.string().optional().describe('Item name. Defaults to the item ID, or Untitled item if both are omitted.'),
         notes: z.string().optional().describe('Optional notes'),
         purchasePrice: z.string().optional().describe('Purchase price as string'),
         acquisitionDate: z.string().optional().describe('Acquisition date (ISO format)'),

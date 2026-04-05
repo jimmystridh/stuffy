@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 interface FormFieldsProps {
   isLoading: boolean
+  isNewItem: boolean
   itemId: string
   name: string
   notes: string
@@ -26,6 +27,7 @@ interface FormFieldsProps {
 
 export function FormFields({
   isLoading,
+  isNewItem,
   itemId,
   name,
   notes,
@@ -84,7 +86,7 @@ export function FormFields({
     <>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-          <Label htmlFor="itemId">Item ID</Label>
+          <Label htmlFor="itemId">Item ID (optional)</Label>
           <Input
             id="itemId"
             name="itemId"
@@ -92,7 +94,7 @@ export function FormFields({
             onChange={onInputChange}
             onBlur={onIdBlur}
             className={getIdInputClassName()}
-            required
+            placeholder="Leave blank if you do not use item IDs"
             disabled={disabled}
           />
           {idValidationStatus === 'invalid' && (
@@ -102,13 +104,14 @@ export function FormFields({
           )}
         </div>
         <div>
-          <Label htmlFor="name">Name</Label>
+          <Label htmlFor="name">{isNewItem ? 'Name (optional)' : 'Name'}</Label>
           <Input
             id="name"
             name="name"
             value={name}
             onChange={onInputChange}
-            required
+            placeholder={isNewItem ? 'Defaults to the Item ID, or Untitled item if both are blank' : undefined}
+            required={!isNewItem}
             disabled={disabled}
           />
         </div>

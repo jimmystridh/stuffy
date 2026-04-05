@@ -244,7 +244,7 @@ export default function StocktakingPage() {
               </div>
             )}
             <div className="p-4">
-              <p className="text-sm text-muted-foreground">ID: {item.itemId}</p>
+              <p className="text-sm text-muted-foreground">ID: {item.itemId || 'No ID'}</p>
               <h2 className="text-xl font-semibold">{item.name}</h2>
               {item.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-2">
@@ -349,7 +349,7 @@ export default function StocktakingPage() {
 
                 <div className="flex-1 min-w-0">
                   <p className="font-medium truncate">{item.name}</p>
-                  <p className="text-xs text-muted-foreground">{item.itemId}</p>
+                  <p className="text-xs text-muted-foreground">{item.itemId || 'No ID'}</p>
                 </div>
 
                 <div className="flex gap-1 flex-shrink-0">

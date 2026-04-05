@@ -57,7 +57,7 @@ function buildFallbackSummary(item: Item) {
     .map(part => part.trim())
     .filter(Boolean)
 
-  return summaryParts.join(' | ') || `Inventory item ${item.itemId}`
+  return summaryParts.join(' | ') || `Inventory item ${item.itemId || item.name || 'untitled'}`
 }
 
 function buildMetadataFallbackAnalysis(
@@ -76,7 +76,7 @@ function buildMetadataFallbackAnalysis(
 
   return {
     model: 'metadata-fallback',
-    identifiedName: item.name.trim() || item.itemId,
+    identifiedName: item.name.trim() || item.itemId || 'Untitled item',
     category: 'unknown',
     summary: buildFallbackSummary(item),
     attributes: [],

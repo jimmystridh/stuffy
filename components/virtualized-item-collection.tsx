@@ -211,7 +211,7 @@ export function VirtualizedItemCollection({
                       )}
                     </div>
                     <div className="font-medium">{item.name}</div>
-                    <div className="text-sm text-gray-500">{item.itemId}</div>
+                    <div className="text-sm text-gray-500">{item.itemId || 'No ID'}</div>
                     <div>{item.location?.name || 'Unassigned'}</div>
                     <div className="text-sm">{new Date(item.createdAt).toLocaleDateString()}</div>
                     <div className="font-semibold">{item.purchasePrice ? `$${item.purchasePrice}` : ''}</div>
@@ -289,7 +289,7 @@ export function VirtualizedItemCollection({
                   </div>
 
                   <CardContent className="p-4">
-                    <p className="mb-2 text-sm text-gray-500">ID: {item.itemId}</p>
+                    <p className="mb-2 text-sm text-gray-500">ID: {item.itemId || 'No ID'}</p>
                     <p className="mb-2 text-sm font-semibold">{item.name}</p>
                     <div className="flex flex-wrap gap-2">
                       {item.tags.map((tag) => (

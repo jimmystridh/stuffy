@@ -112,7 +112,7 @@ export function Page({ params }: { params: { id: string } }) {
             <CardTitle>Details</CardTitle>
           </CardHeader>
           <CardContent>
-            <p><strong>ID:</strong> {item.itemId}</p>
+            <p><strong>ID:</strong> {item.itemId || 'No ID'}</p>
             <p><strong>Date Created:</strong> {new Date(item.createdAt).toLocaleDateString()}</p>
             <p><strong>Purchase Price:</strong> {item.purchasePrice ? `$${item.purchasePrice}` : 'N/A'}</p>
             <p><strong>Acquisition Date:</strong> {item.acquisitionDate ? new Date(item.acquisitionDate).toLocaleDateString() : 'N/A'}</p>

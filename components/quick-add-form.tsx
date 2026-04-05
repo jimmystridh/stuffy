@@ -1,23 +1,25 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Camera, Loader2, X } from 'lucide-react'
-import { createItem, checkItemIdExists } from '@/app/actions/items'
+import { checkItemIdExists, createItem, discardUploadedItemImage, uploadItemImage } from '@/app/actions/items'
 import { getLocations } from '@/app/actions/locations'
 import { TagInput } from '@/components/item/components/TagInput'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { prepareUploadImage } from '@/lib/client/prepare-upload-image'
-import type { Location } from '@/lib/types'
+import type { Location, UploadedImageFile } from '@/lib/types'
 
 export function QuickAddForm() {
   const [locations, setLocations] = useState<Location[]>([])
   const [photo, setPhoto] = useState<File | null>(null)
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null)
+  const [uploadedPhoto, setUploadedPhoto] = useState<UploadedImageFile | null>(null)
   const [isPreparingPhoto, setIsPreparingPhoto] = useState(false)
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [id, setId] = useState('')
   const [name, setName] = useState('')
@@ -27,7 +29,13 @@ export function QuickAddForm() {
   const [idValidationStatus, setIdValidationStatus] = useState<'idle' | 'valid' | 'invalid'>('idle')
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const isBusy = isPreparingPhoto || isSubmitting
+  const isMountedRef = useRef(true)
+  const uploadedPhotoRef = useRef<UploadedImageFile | null>(null)
+  const photoUploadVersionRef = useRef(0)
+
+  const isWorking = isPreparingPhoto || isUploadingPhoto || isSubmitting
+  const trimmedId = id.trim()
+  const canSubmit = !!photo && !!uploadedPhoto && !isPreparingPhoto && !isUploadingPhoto && !isSubmitting
 
   useEffect(() => {
     const load = async () => {
@@ -36,6 +44,10 @@ export function QuickAddForm() {
     }
     load()
   }, [])
+
+  useEffect(() => {
+    uploadedPhotoRef.current = uploadedPhoto
+  }, [uploadedPhoto])
 
   useEffect(() => {
     if (!photo) {
@@ -47,36 +59,123 @@ export function QuickAddForm() {
     return () => URL.revokeObjectURL(objectUrl)
   }, [photo])
 
-  const resetForm = () => {
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false
+      photoUploadVersionRef.current += 1
+      const pendingUpload = uploadedPhotoRef.current
+      if (pendingUpload) {
+        void discardUploadedItemImage(pendingUpload.storedFilename)
+      }
+    }
+  }, [])
+
+  const cleanupUploadedPhoto = (upload: UploadedImageFile | null) => {
+    if (!upload) return
+    void discardUploadedItemImage(upload.storedFilename)
+  }
+
+  const invalidatePhotoUpload = () => {
+    photoUploadVersionRef.current += 1
+    return photoUploadVersionRef.current
+  }
+
+  const clearPhotoState = ({
+    cleanupUpload = true,
+    clearInput = true,
+  }: {
+    cleanupUpload?: boolean
+    clearInput?: boolean
+  } = {}) => {
+    const currentUpload = uploadedPhotoRef.current
+    uploadedPhotoRef.current = null
     setPhoto(null)
+    setUploadedPhoto(null)
+    setIsUploadingPhoto(false)
+
+    if (cleanupUpload) {
+      cleanupUploadedPhoto(currentUpload)
+    }
+
+    if (clearInput && fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const resetForm = () => {
+    invalidatePhotoUpload()
+    clearPhotoState({ cleanupUpload: false })
     setId('')
     setName('')
     setTags([])
     setIdValidationStatus('idle')
-    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const startPhotoUpload = async (file: File, uploadVersion: number) => {
+    try {
+      const formData = new FormData()
+      formData.append('image', file)
+      const result = await uploadItemImage(formData)
+      const nextUploadedPhoto = result.uploadedImage ?? null
+
+      if (!isMountedRef.current || uploadVersion !== photoUploadVersionRef.current) {
+        cleanupUploadedPhoto(nextUploadedPhoto)
+        return
+      }
+
+      if (result.error || !nextUploadedPhoto) {
+        uploadedPhotoRef.current = null
+        setUploadedPhoto(null)
+        setMessage({ type: 'error', text: result.error || 'Failed to upload photo' })
+        return
+      }
+
+      uploadedPhotoRef.current = nextUploadedPhoto
+      setUploadedPhoto(nextUploadedPhoto)
+    } catch {
+      if (isMountedRef.current && uploadVersion === photoUploadVersionRef.current) {
+        uploadedPhotoRef.current = null
+        setUploadedPhoto(null)
+        setMessage({ type: 'error', text: 'Failed to upload photo' })
+      }
+    } finally {
+      if (isMountedRef.current && uploadVersion === photoUploadVersionRef.current) {
+        setIsUploadingPhoto(false)
+      }
+    }
   }
 
   const handleCapture = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
 
+    const uploadVersion = invalidatePhotoUpload()
     setMessage(null)
+    clearPhotoState({ clearInput: false })
     setIsPreparingPhoto(true)
 
     try {
       const preparedPhoto = await prepareUploadImage(file)
+      if (!isMountedRef.current || uploadVersion !== photoUploadVersionRef.current) {
+        return
+      }
+
       setPhoto(preparedPhoto)
+      setIsUploadingPhoto(true)
+      void startPhotoUpload(preparedPhoto, uploadVersion)
     } finally {
-      setIsPreparingPhoto(false)
+      if (isMountedRef.current && uploadVersion === photoUploadVersionRef.current) {
+        setIsPreparingPhoto(false)
+      }
     }
   }
 
   const handleIdBlur = async (e: React.FocusEvent<HTMLInputElement>) => {
-    if (isBusy) return
+    if (isSubmitting) return
 
     const itemId = e.target.value.trim()
     if (!itemId) {
-      setIdValidationStatus('invalid')
+      setIdValidationStatus('idle')
       return
     }
     try {
@@ -98,21 +197,23 @@ export function QuickAddForm() {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!photo || !id || isBusy) return
+    if (!photo || !uploadedPhoto || !canSubmit) return
 
     setIsSubmitting(true)
     setMessage(null)
     try {
-      const exists = await checkItemIdExists(id)
-      if (exists) {
-        setMessage({ type: 'error', text: 'Item ID already exists' })
-        return
+      if (trimmedId) {
+        const exists = await checkItemIdExists(trimmedId)
+        if (exists) {
+          setMessage({ type: 'error', text: 'Item ID already exists' })
+          return
+        }
       }
 
       const formData = new FormData()
-      formData.append('itemId', id)
-      formData.append('name', name.trim() || id)
-      formData.append('images', photo)
+      formData.append('itemId', trimmedId)
+      formData.append('name', name.trim())
+      formData.append('uploadedImages', JSON.stringify(uploadedPhoto))
       if (locationId) formData.append('locationId', locationId)
       tags.forEach((tag, index) => {
         formData.append(`tags[${index}]`, tag)
@@ -124,7 +225,12 @@ export function QuickAddForm() {
         return
       }
 
-      setMessage({ type: 'success', text: `Item ${id} added successfully.` })
+      setMessage({
+        type: 'success',
+        text: trimmedId
+          ? `Item ${trimmedId} added successfully.`
+          : `${result.item?.name || 'Item'} added successfully.`,
+      })
       resetForm()
     } catch {
       setMessage({ type: 'error', text: 'Failed to save item' })
@@ -134,14 +240,18 @@ export function QuickAddForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4" aria-busy={isBusy}>
-      {isBusy && (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4" aria-busy={isWorking}>
+      {isWorking && (
         <div
           className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
           aria-live="polite"
         >
           <Loader2 className="h-4 w-4 animate-spin" />
-          {isSubmitting ? 'Adding item. Fields are locked until it finishes.' : 'Processing photo...'}
+          {isSubmitting
+            ? 'Adding item. Fields are locked until it finishes.'
+            : isPreparingPhoto
+              ? 'Processing photo...'
+              : 'Uploading photo in the background. You can keep filling out the form.'}
         </div>
       )}
       {message && (
@@ -149,7 +259,7 @@ export function QuickAddForm() {
           {message.text}
         </div>
       )}
-      <fieldset disabled={isBusy} className="flex min-w-0 flex-col gap-4">
+      <fieldset disabled={isSubmitting} className="flex min-w-0 flex-col gap-4">
         <div className="flex flex-col items-center gap-2">
           {photo ? (
             <div className="relative w-full">
@@ -160,7 +270,7 @@ export function QuickAddForm() {
                   width={1024}
                   height={1024}
                   unoptimized
-                  className="w-full h-64 object-cover rounded-lg"
+                  className="h-64 w-full rounded-lg object-cover"
                 />
               )}
               <Button
@@ -169,16 +279,16 @@ export function QuickAddForm() {
                 size="icon"
                 className="absolute top-2 right-2 rounded-full"
                 onClick={() => {
-                  setPhoto(null)
-                  if (fileInputRef.current) fileInputRef.current.value = ''
+                  invalidatePhotoUpload()
+                  clearPhotoState()
                 }}
-                disabled={isBusy}
+                disabled={isPreparingPhoto || isSubmitting}
               >
                 <X className="h-4 w-4" />
               </Button>
             </div>
           ) : (
-            <div className="w-full h-64 bg-gray-200 dark:bg-gray-800 rounded-lg flex items-center justify-center">
+            <div className="flex h-64 w-full items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-800">
               <Camera className="h-12 w-12 text-gray-400" />
             </div>
           )}
@@ -189,32 +299,31 @@ export function QuickAddForm() {
             onChange={handleCapture}
             className="hidden"
             ref={fileInputRef}
-            disabled={isBusy}
+            disabled={isPreparingPhoto || isSubmitting}
           />
           <Button
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className="w-full"
-            disabled={isBusy}
+            disabled={isPreparingPhoto || isSubmitting}
           >
             {isPreparingPhoto ? 'Processing Photo...' : photo ? 'Retake Photo' : 'Take Photo'}
           </Button>
         </div>
         <div className="flex flex-col gap-2">
-          <Label htmlFor="item-id">Item ID</Label>
+          <Label htmlFor="item-id">Item ID (optional)</Label>
           <Input
             id="item-id"
             type="text"
-            placeholder="Enter item ID"
+            placeholder="Leave blank if you do not use item IDs"
             value={id}
             onChange={(e) => setId(e.target.value)}
             onBlur={handleIdBlur}
             className={getIdInputClassName()}
-            required
-            disabled={isBusy}
+            disabled={isSubmitting}
           />
           {idValidationStatus === 'invalid' && (
-            <p className="text-sm text-red-500 mt-1">This ID is already taken or invalid</p>
+            <p className="mt-1 text-sm text-red-500">This ID is already taken or invalid</p>
           )}
         </div>
         <div className="flex flex-col gap-2">
@@ -222,7 +331,7 @@ export function QuickAddForm() {
           <Select
             value={locationId || 'null'}
             onValueChange={(v) => setLocationId(v === 'null' ? null : v)}
-            disabled={isBusy}
+            disabled={isSubmitting}
           >
             <SelectTrigger>
               <SelectValue placeholder="Select a location" />
@@ -240,7 +349,7 @@ export function QuickAddForm() {
           variant="outline"
           className="w-full"
           onClick={() => setShowMoreFields((current) => !current)}
-          disabled={isBusy}
+          disabled={isSubmitting}
         >
           {showMoreFields ? 'Hide Extra Fields' : 'Add More Fields'}
         </Button>
@@ -251,10 +360,10 @@ export function QuickAddForm() {
               <Input
                 id="item-name"
                 type="text"
-                placeholder="Defaults to the item ID"
+                placeholder="Defaults to Untitled item if left blank"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                disabled={isBusy}
+                disabled={isSubmitting}
               />
             </div>
             <div className="flex flex-col gap-2">
@@ -262,12 +371,12 @@ export function QuickAddForm() {
               <TagInput
                 tags={tags}
                 onTagsChange={setTags}
-                disabled={isBusy}
+                disabled={isSubmitting}
               />
             </div>
           </>
         )}
-        <Button type="submit" className="w-full" disabled={!photo || !id || isBusy}>
+        <Button type="submit" className="w-full" disabled={!canSubmit}>
           {isSubmitting ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -275,6 +384,8 @@ export function QuickAddForm() {
             </>
           ) : isPreparingPhoto ? (
             'Processing Photo...'
+          ) : isUploadingPhoto ? (
+            'Uploading Photo...'
           ) : (
             'Add Item'
           )}

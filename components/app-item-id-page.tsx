@@ -192,6 +192,7 @@ export function Page({ params }: { params: { id: string } }) {
       <form onSubmit={handleSubmit} className="space-y-6">
         <FormFields
           isLoading={isLoading}
+          isNewItem={isNewItem}
           itemId={item.itemId}
           name={item.name}
           notes={item.notes}

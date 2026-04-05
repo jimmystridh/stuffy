@@ -4,14 +4,42 @@ import { adminDb } from '@/lib/firebase/admin'
 import { buildItemAiData, cosineSimilarity, generateSemanticQueryEmbedding } from '@/lib/ai/item-intelligence'
 import { saveFile, saveFileFromUrl, deleteFile, type SavedFile } from '@/lib/file-storage'
 import { isAllLocationsFilter, isNoLocationFilter } from '@/lib/location-filters'
-import type { Item, ItemImage, GetItemsParams, GetItemsResponse } from '@/lib/types'
+import type { Item, ItemImage, GetItemsParams, GetItemsResponse, UploadedImageFile } from '@/lib/types'
 
 const itemsCol = () => adminDb.collection('items')
 const locationsCol = () => adminDb.collection('locations')
 
+function normalizeItemIdValue(itemId: string | null | undefined) {
+  return itemId?.trim().toLowerCase() ?? ''
+}
+
+function normalizeNameValue(
+  name: string | null | undefined,
+  ...fallbackValues: Array<string | null | undefined>
+) {
+  const trimmedName = name?.trim() ?? ''
+  if (trimmedName) {
+    return trimmedName
+  }
+
+  for (const fallbackValue of fallbackValues) {
+    const trimmedFallback = fallbackValue?.trim() ?? ''
+    if (trimmedFallback) {
+      return trimmedFallback
+    }
+  }
+
+  return 'Untitled item'
+}
+
 export async function checkItemIdExists(itemId: string): Promise<boolean> {
+  const normalizedItemId = normalizeItemIdValue(itemId)
+  if (!normalizedItemId) {
+    return false
+  }
+
   const snapshot = await itemsCol()
-    .where('itemId', '==', itemId.toLowerCase())
+    .where('itemId', '==', normalizedItemId)
     .where('deleted', '==', false)
     .limit(1)
     .get()
@@ -19,8 +47,8 @@ export async function checkItemIdExists(itemId: string): Promise<boolean> {
 }
 
 export interface CreateItemData {
-  itemId: string
-  name: string
+  itemId?: string | null
+  name?: string | null
   notes?: string | null
   purchasePrice?: string | null
   acquisitionDate?: string | null
@@ -28,15 +56,74 @@ export interface CreateItemData {
   tags?: string[]
   imageFiles?: File[]
   imageUrls?: string[]
+  uploadedImages?: UploadedImageFile[]
+}
+
+function isUploadedImageFile(value: unknown): value is UploadedImageFile {
+  const candidate = value as Record<string, unknown> | null
+  return (
+    !!candidate &&
+    typeof candidate === 'object' &&
+    typeof candidate.filename === 'string' &&
+    typeof candidate.storedFilename === 'string' &&
+    typeof candidate.thumbnailFilename === 'string' &&
+    typeof candidate.publicUrl === 'string' &&
+    typeof candidate.thumbnailUrl === 'string' &&
+    typeof candidate.mimeType === 'string' &&
+    typeof candidate.size === 'number'
+  )
+}
+
+function parseUploadedImages(formData: FormData): UploadedImageFile[] {
+  return formData.getAll('uploadedImages').map((value) => {
+    if (typeof value !== 'string') {
+      throw new Error('Invalid uploaded image payload')
+    }
+
+    const parsed = JSON.parse(value) as unknown
+    if (!isUploadedImageFile(parsed)) {
+      throw new Error('Invalid uploaded image payload')
+    }
+
+    return parsed
+  })
+}
+
+export async function uploadItemImage(formData: FormData) {
+  try {
+    const image = formData.get('image')
+    if (!(image instanceof File) || image.size === 0) {
+      return { error: 'No photo selected' }
+    }
+
+    const uploadedImage = await saveFile(image)
+    return { uploadedImage }
+  } catch (error) {
+    console.error('Failed to upload item image:', error)
+    return { error: 'Failed to upload photo' }
+  }
+}
+
+export async function discardUploadedItemImage(storedFilename: string) {
+  if (!storedFilename) {
+    return { ok: true }
+  }
+
+  await deleteFile(storedFilename)
+  return { ok: true }
 }
 
 export async function createItemFromData(data: CreateItemData) {
-  const exists = await checkItemIdExists(data.itemId)
-  if (exists) {
-    return { error: 'Item ID already exists' }
+  const itemId = normalizeItemIdValue(data.itemId)
+  const name = normalizeNameValue(data.name, itemId)
+  if (itemId) {
+    const exists = await checkItemIdExists(itemId)
+    if (exists) {
+      return { error: 'Item ID already exists' }
+    }
   }
 
-  const savedFiles: SavedFile[] = []
+  const savedFiles: SavedFile[] = [...(data.uploadedImages || [])]
   if (data.imageFiles) {
     for (const image of data.imageFiles) {
       if (image.size > 0) {
@@ -79,8 +166,8 @@ export async function createItemFromData(data: CreateItemData) {
   }
 
   const itemData: Omit<Item, 'id'> = {
-    itemId: data.itemId.toLowerCase(),
-    name: data.name,
+    itemId,
+    name,
     notes: data.notes || null,
     purchasePrice: data.purchasePrice || null,
     acquisitionDate: data.acquisitionDate || null,
@@ -121,14 +208,15 @@ export async function createItem(formData: FormData) {
     }
 
     return await createItemFromData({
-      itemId: formData.get('itemId') as string,
-      name: formData.get('name') as string,
+      itemId: (formData.get('itemId') as string | null) ?? '',
+      name: (formData.get('name') as string | null) ?? undefined,
       notes: formData.get('notes') as string | null,
       purchasePrice: formData.get('purchasePrice') as string | null,
       acquisitionDate: formData.get('acquisitionDate') as string | null,
       locationId: formData.get('locationId') as string | null,
       tags,
       imageFiles: (formData.getAll('images') as File[]),
+      uploadedImages: parseUploadedImages(formData),
     })
   } catch (error) {
     console.error('Failed to create item:', error)
@@ -137,8 +225,8 @@ export async function createItem(formData: FormData) {
 }
 
 export interface UpdateItemData {
-  itemId?: string
-  name?: string
+  itemId?: string | null
+  name?: string | null
   notes?: string | null
   purchasePrice?: string | null
   acquisitionDate?: string | null
@@ -175,6 +263,16 @@ export async function updateItemFromData(id: string, data: UpdateItemData) {
   const existingData = existingDoc.data() as Omit<Item, 'id'>
   const existingImages = (existingData.images || []).filter(img => !img.deleted)
   const shouldRefreshAi = savedFiles.length > 0 || !existingData.ai
+  const normalizedItemId = data.itemId !== undefined
+    ? normalizeItemIdValue(data.itemId)
+    : undefined
+
+  if (normalizedItemId && normalizedItemId !== existingData.itemId) {
+    const existingItemWithId = await checkItemIdExists(normalizedItemId)
+    if (existingItemWithId) {
+      return { error: 'Item ID already exists' }
+    }
+  }
 
   const newImageRecords: ItemImage[] = savedFiles.map((file, idx) => ({
     id: `${id}_img_${Date.now()}_${idx}`,
@@ -201,8 +299,10 @@ export async function updateItemFromData(id: string, data: UpdateItemData) {
   }
 
   const updateData: Partial<Item> = {
-    ...(data.itemId !== undefined && { itemId: data.itemId.toLowerCase() }),
-    ...(data.name !== undefined && { name: data.name }),
+    ...(normalizedItemId !== undefined && { itemId: normalizedItemId }),
+    ...(data.name !== undefined && {
+      name: normalizeNameValue(data.name, existingData.name, normalizedItemId, existingData.itemId),
+    }),
     ...(data.notes !== undefined && { notes: data.notes || null }),
     ...(data.purchasePrice !== undefined && { purchasePrice: data.purchasePrice || null }),
     ...(data.acquisitionDate !== undefined && { acquisitionDate: data.acquisitionDate || null }),
@@ -240,8 +340,8 @@ export async function updateItem(id: string, formData: FormData) {
     }
 
     return await updateItemFromData(id, {
-      itemId: formData.get('itemId') as string,
-      name: formData.get('name') as string,
+      itemId: formData.get('itemId') as string | null,
+      name: formData.get('name') as string | null,
       notes: formData.get('notes') as string | null,
       purchasePrice: formData.get('purchasePrice') as string | null,
       acquisitionDate: formData.get('acquisitionDate') as string | null,
@@ -471,8 +571,13 @@ export async function getItemById(id: string) {
 
 export async function getItemByItemId(itemId: string) {
   try {
+    const normalizedItemId = normalizeItemIdValue(itemId)
+    if (!normalizedItemId) {
+      return { error: 'Item ID is required' }
+    }
+
     const snapshot = await itemsCol()
-      .where('itemId', '==', itemId.toLowerCase())
+      .where('itemId', '==', normalizedItemId)
       .where('deleted', '==', false)
       .limit(1)
       .get()
