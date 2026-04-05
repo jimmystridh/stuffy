@@ -3,19 +3,12 @@
 import crypto from 'crypto'
 import sharp from 'sharp'
 import { bucket } from './firebase/storage'
+import type { UploadedImageFile } from './types'
 
 const THUMBNAIL_WIDTH = 300
 const MAX_IMAGE_WIDTH = 1280
 
-export interface SavedFile {
-  filename: string
-  storedFilename: string
-  thumbnailFilename: string
-  publicUrl: string
-  thumbnailUrl: string
-  mimeType: string
-  size: number
-}
+export type SavedFile = UploadedImageFile
 
 export async function saveFile(file: File): Promise<SavedFile> {
   const fileExtension = file.name.split('.').pop() || 'jpg'

@@ -13,6 +13,16 @@ export interface ItemImage {
   deletedAt: string | null
 }
 
+export interface UploadedImageFile {
+  filename: string
+  storedFilename: string
+  thumbnailFilename: string
+  publicUrl: string
+  thumbnailUrl: string
+  mimeType: string
+  size: number
+}
+
 export interface ItemAiAnalysis {
   model: string
   identifiedName: string
