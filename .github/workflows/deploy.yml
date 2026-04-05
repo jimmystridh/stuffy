@@ -97,9 +97,19 @@ jobs:
           echo "${URL}"
 
       - name: Ensure daily backup scheduler
+        env:
+          BACKUP_CRON_SECRET: ${{ secrets.BACKUP_CRON_SECRET }}
+          GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.GOOGLE_DRIVE_CLIENT_ID }}
+          GOOGLE_DRIVE_CLIENT_SECRET: ${{ secrets.GOOGLE_DRIVE_CLIENT_SECRET }}
+          GOOGLE_DRIVE_REFRESH_TOKEN: ${{ secrets.GOOGLE_DRIVE_REFRESH_TOKEN }}
         run: |
+          if [ -z "${BACKUP_CRON_SECRET}" ] || [ -z "${GOOGLE_DRIVE_CLIENT_ID}" ] || [ -z "${GOOGLE_DRIVE_CLIENT_SECRET}" ] || [ -z "${GOOGLE_DRIVE_REFRESH_TOKEN}" ]; then
+            echo "Skipping backup scheduler setup because Google Drive backup secrets are not fully configured."
+            exit 0
+          fi
+
           BACKUP_URL="${{ steps.cloud_run_url.outputs.url }}/api/admin/backups/drive"
-          HEADERS="X-Backup-Secret=${{ secrets.BACKUP_CRON_SECRET }}"
+          HEADERS="X-Backup-Secret=${BACKUP_CRON_SECRET}"
 
           if gcloud scheduler jobs describe "${{ env.BACKUP_SCHEDULER_JOB_NAME }}" --location "${{ env.BACKUP_SCHEDULER_LOCATION }}" >/dev/null 2>&1; then
             gcloud scheduler jobs update http "${{ env.BACKUP_SCHEDULER_JOB_NAME }}" \
