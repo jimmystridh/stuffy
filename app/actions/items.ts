@@ -50,6 +50,7 @@ export async function checkItemIdExists(itemId: string): Promise<boolean> {
 export interface CreateItemData {
   itemId?: string | null
   name?: string | null
+  preferAiGeneratedName?: boolean
   notes?: string | null
   purchasePrice?: string | null
   acquisitionDate?: string | null
@@ -93,12 +94,24 @@ function parseUploadedImages(formData: FormData): UploadedImageFile[] {
 function scheduleItemAiRefresh(
   itemRef: FirebaseFirestore.DocumentReference,
   item: Item,
-  errorContext: string
+  errorContext: string,
+  options: {
+    preferAiGeneratedName?: boolean
+  } = {}
 ) {
   after(async () => {
     try {
       const ai = await buildItemAiData(item)
-      await itemRef.update({ ai })
+      const nextUpdate: Partial<Item> = { ai }
+
+      if (options.preferAiGeneratedName && ai && ai.analysis.model !== 'metadata-fallback') {
+        const generatedName = ai.analysis.identifiedName.trim()
+        if (generatedName) {
+          nextUpdate.name = generatedName
+        }
+      }
+
+      await itemRef.update(nextUpdate)
     } catch (error) {
       console.error(errorContext, error)
     }
@@ -132,6 +145,7 @@ export async function discardUploadedItemImage(storedFilename: string) {
 export async function createItemFromData(data: CreateItemData) {
   const itemId = normalizeItemIdValue(data.itemId)
   const name = normalizeNameValue(data.name, itemId)
+  const preferAiGeneratedName = data.preferAiGeneratedName && !data.name?.trim()
   if (itemId) {
     const exists = await checkItemIdExists(itemId)
     if (exists) {
@@ -202,7 +216,12 @@ export async function createItemFromData(data: CreateItemData) {
   const createdItem = { id: itemRef.id, ...itemData } as Item
 
   if (createdItem.images.length > 0) {
-    scheduleItemAiRefresh(itemRef, createdItem, 'Failed to generate AI data for created item:')
+    scheduleItemAiRefresh(
+      itemRef,
+      createdItem,
+      'Failed to generate AI data for created item:',
+      { preferAiGeneratedName }
+    )
   }
 
   return { item: createdItem }
@@ -220,6 +239,7 @@ export async function createItem(formData: FormData) {
     return await createItemFromData({
       itemId: (formData.get('itemId') as string | null) ?? '',
       name: (formData.get('name') as string | null) ?? undefined,
+      preferAiGeneratedName: formData.get('preferAiGeneratedName') === 'true',
       notes: formData.get('notes') as string | null,
       purchasePrice: formData.get('purchasePrice') as string | null,
       acquisitionDate: formData.get('acquisitionDate') as string | null,
@@ -503,6 +523,28 @@ async function getFilteredItems({
     ...item,
     images: (item.images || []).filter(img => !img.deleted),
   }))
+}
+
+export async function getItemsByLocationId(locationId: string): Promise<{ items: Item[], error?: string }> {
+  try {
+    const snapshot = await itemsCol()
+      .where('locationId', '==', locationId)
+      .where('deleted', '==', false)
+      .get()
+
+    const items = snapshot.docs
+      .map(doc => {
+        const item = { id: doc.id, ...doc.data() } as Item
+        item.images = (item.images || []).filter(img => !img.deleted)
+        return item
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
+
+    return { items }
+  } catch (error) {
+    console.error('Failed to fetch items by location ID:', error)
+    return { items: [], error: 'Failed to fetch items' }
+  }
 }
 
 export async function getItems({

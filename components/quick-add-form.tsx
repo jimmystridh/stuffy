@@ -202,9 +202,13 @@ export function QuickAddForm() {
     setIsSubmitting(true)
     setMessage(null)
     try {
+      const trimmedName = name.trim()
       const formData = new FormData()
       formData.append('itemId', trimmedId)
-      formData.append('name', name.trim())
+      formData.append('name', trimmedName)
+      if (!trimmedName) {
+        formData.append('preferAiGeneratedName', 'true')
+      }
       formData.append('uploadedImages', JSON.stringify(uploadedPhoto))
       if (locationId) formData.append('locationId', locationId)
       tags.forEach((tag, index) => {
