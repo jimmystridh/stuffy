@@ -1,4 +1,7 @@
-import 'dotenv/config'
+import * as dotenv from 'dotenv'
+import * as path from 'path'
+
+dotenv.config({ path: path.resolve(__dirname, '../.env.local') })
 
 import { adminDb } from '@/lib/firebase/admin'
 import { buildItemAiData } from '@/lib/ai/item-intelligence'
