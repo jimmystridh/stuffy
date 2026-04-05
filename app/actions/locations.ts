@@ -54,6 +54,19 @@ export async function updateLocation(id: string, data: { name: string; notes?: s
   }
 }
 
+export async function getLocationById(id: string) {
+  try {
+    const doc = await locationsCol().doc(id).get()
+    if (!doc.exists) {
+      return { error: 'Location not found' }
+    }
+    return { location: { id: doc.id, ...doc.data() } as Location }
+  } catch (error) {
+    console.error('Failed to fetch location:', error)
+    return { error: 'Failed to fetch location' }
+  }
+}
+
 export async function deleteLocation(id: string) {
   try {
     await locationsCol().doc(id).delete()

@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { Pencil, Trash2, X, Check } from 'lucide-react'
+import { Pencil, Trash2, X, Check, LayoutGrid } from 'lucide-react'
+import Link from 'next/link'
 import { getLocations, createLocation, updateLocation, deleteLocation } from '@/app/actions/locations'
 import type { Location } from '@/lib/types'
 
@@ -17,8 +18,10 @@ export function Page() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState({ name: '', notes: '' })
 
-  const loadLocations = async () => {
-    setStatus('loading')
+  const loadLocations = async (showLoadingState = true) => {
+    if (showLoadingState) {
+      setStatus('loading')
+    }
     const result = await getLocations()
     if (result.error) {
       setStatus('failed')
@@ -29,7 +32,27 @@ export function Page() {
   }
 
   useEffect(() => {
-    loadLocations()
+    let isCancelled = false
+
+    async function loadInitialLocations() {
+      const result = await getLocations()
+      if (isCancelled) {
+        return
+      }
+
+      if (result.error) {
+        setStatus('failed')
+      } else {
+        setLocations(result.locations)
+        setStatus('idle')
+      }
+    }
+
+    void loadInitialLocations()
+
+    return () => {
+      isCancelled = true
+    }
   }, [])
 
   const handleAddLocation = async () => {
@@ -131,6 +154,11 @@ export function Page() {
                     <p className="text-sm text-muted-foreground mt-1">{location.notes}</p>
                   </div>
                   <div className="flex space-x-2">
+                    <Link href={`/locations/${location.id}/collage`}>
+                      <Button variant="outline" size="sm">
+                        <LayoutGrid className="h-4 w-4" />
+                      </Button>
+                    </Link>
                     <Button variant="outline" size="sm" onClick={() => handleEditLocation(location)}>
                       <Pencil className="h-4 w-4" />
                     </Button>
