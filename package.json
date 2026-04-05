@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "ai:backfill": "tsx scripts/backfill-item-ai.ts"
+    "ai:backfill": "tsx scripts/backfill-item-ai.ts",
+    "backup:drive": "tsx scripts/run-drive-backup.ts"
   },
   "dependencies": {
     "@ai-sdk/google-vertex": "^4.0.102",
@@ -43,6 +44,7 @@
     "sharp": "^0.34.5",
     "tailwind-merge": "^3.5.0",
     "tailwindcss-animate": "^1.0.7",
+    "tar": "^7.5.13",
     "zod": "^4.3.6"
   },
   "devDependencies": {

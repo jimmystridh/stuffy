@@ -11,6 +11,7 @@ export function middleware(request: NextRequest) {
   const publicPaths = [
     '/login',
     '/api/auth',
+    '/api/admin/backups/drive',
     '/api/mcp',
     '/.well-known',
     '/_next',

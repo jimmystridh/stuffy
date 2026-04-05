@@ -9,6 +9,10 @@ env:
   REGION: europe-north1
   SERVICE_NAME: stuffy
   GAR_LOCATION: europe-north1-docker.pkg.dev
+  BACKUP_SCHEDULER_JOB_NAME: stuffy-daily-drive-backup
+  BACKUP_SCHEDULER_LOCATION: europe-west1
+  BACKUP_SCHEDULER_SCHEDULE: '17 2 * * *'
+  BACKUP_SCHEDULER_TIMEZONE: Europe/Stockholm
 
 jobs:
   deploy:
@@ -66,13 +70,53 @@ jobs:
             --set-env-vars "ALLOWED_EMAILS=${{ secrets.ALLOWED_EMAILS }}" \
             --set-env-vars "NODE_ENV=production" \
             --set-env-vars "MCP_AUTH_SECRET=${{ secrets.MCP_AUTH_SECRET }}" \
+            --set-env-vars "GOOGLE_DRIVE_CLIENT_ID=${{ secrets.GOOGLE_DRIVE_CLIENT_ID }}" \
+            --set-env-vars "GOOGLE_DRIVE_CLIENT_SECRET=${{ secrets.GOOGLE_DRIVE_CLIENT_SECRET }}" \
+            --set-env-vars "GOOGLE_DRIVE_REFRESH_TOKEN=${{ secrets.GOOGLE_DRIVE_REFRESH_TOKEN }}" \
+            --set-env-vars "GOOGLE_DRIVE_BACKUP_ROOT_FOLDER_ID=${{ secrets.GOOGLE_DRIVE_BACKUP_ROOT_FOLDER_ID }}" \
+            --set-env-vars "GOOGLE_DRIVE_BACKUP_FOLDER_NAME=Stuffy Backups" \
+            --set-env-vars "BACKUP_CRON_SECRET=${{ secrets.BACKUP_CRON_SECRET }}" \
+            --set-env-vars "BACKUP_RETENTION_DAILY=7" \
+            --set-env-vars "BACKUP_RETENTION_WEEKLY=8" \
+            --set-env-vars "BACKUP_RETENTION_MONTHLY=12" \
+            --set-env-vars "BACKUP_RETENTION_YEARLY=3" \
+            --set-env-vars "BACKUP_RETENTION_TIMEZONE=${{ env.BACKUP_SCHEDULER_TIMEZONE }}" \
             --memory 512Mi \
             --cpu 1 \
+            --timeout 1800 \
             --min-instances 0 \
             --max-instances 3
 
-      - name: Show Cloud Run URL
+      - name: Resolve Cloud Run URL
+        id: cloud_run_url
         run: |
-          gcloud run services describe ${{ env.SERVICE_NAME }} \
+          URL="$(gcloud run services describe ${{ env.SERVICE_NAME }} \
             --region ${{ env.REGION }} \
-            --format 'value(status.url)'
+            --format 'value(status.url)')"
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "${URL}"
+
+      - name: Ensure daily backup scheduler
+        run: |
+          BACKUP_URL="${{ steps.cloud_run_url.outputs.url }}/api/admin/backups/drive"
+          HEADERS="X-Backup-Secret=${{ secrets.BACKUP_CRON_SECRET }}"
+
+          if gcloud scheduler jobs describe "${{ env.BACKUP_SCHEDULER_JOB_NAME }}" --location "${{ env.BACKUP_SCHEDULER_LOCATION }}" >/dev/null 2>&1; then
+            gcloud scheduler jobs update http "${{ env.BACKUP_SCHEDULER_JOB_NAME }}" \
+              --location "${{ env.BACKUP_SCHEDULER_LOCATION }}" \
+              --schedule "${{ env.BACKUP_SCHEDULER_SCHEDULE }}" \
+              --time-zone "${{ env.BACKUP_SCHEDULER_TIMEZONE }}" \
+              --uri "${BACKUP_URL}" \
+              --http-method POST \
+              --attempt-deadline 30m \
+              --headers "${HEADERS}"
+          else
+            gcloud scheduler jobs create http "${{ env.BACKUP_SCHEDULER_JOB_NAME }}" \
+              --location "${{ env.BACKUP_SCHEDULER_LOCATION }}" \
+              --schedule "${{ env.BACKUP_SCHEDULER_SCHEDULE }}" \
+              --time-zone "${{ env.BACKUP_SCHEDULER_TIMEZONE }}" \
+              --uri "${BACKUP_URL}" \
+              --http-method POST \
+              --attempt-deadline 30m \
+              --headers "${HEADERS}"
+          fi
