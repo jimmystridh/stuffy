@@ -2,6 +2,7 @@
 
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import Image from 'next/image'
+import Link from 'next/link'
 import { useWindowVirtualizer } from '@tanstack/react-virtual'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -14,7 +15,7 @@ interface VirtualizedItemCollectionProps {
   itemsByIndex: Array<Item | undefined>
   totalItems: number
   viewMode: 'card' | 'list'
-  onItemClick: (id: string, index: number) => void
+  getItemHref: (id: string, index: number) => string
   onVisibleRangeChange: (startIndex: number, endIndex: number) => void
   restoreIndex?: number
   restoreKey?: string | null
@@ -54,7 +55,7 @@ export function VirtualizedItemCollection({
   itemsByIndex,
   totalItems,
   viewMode,
-  onItemClick,
+  getItemHref,
   onVisibleRangeChange,
   restoreIndex = -1,
   restoreKey = null,
@@ -192,9 +193,9 @@ export function VirtualizedItemCollection({
                 style={{ transform: `translateY(${virtualRow.start - scrollMargin}px)` }}
               >
                 {item ? (
-                  <div
-                    className="grid cursor-pointer grid-cols-[72px_minmax(180px,1.4fr)_minmax(110px,0.9fr)_minmax(140px,1fr)_minmax(140px,0.9fr)_minmax(120px,0.8fr)_minmax(220px,1.2fr)] items-center gap-x-4 border-x border-b bg-background px-4 py-3 transition-colors duration-200 hover:bg-muted/40"
-                    onClick={() => onItemClick(item.id, virtualRow.index)}
+                  <Link
+                    href={getItemHref(item.id, virtualRow.index)}
+                    className="grid grid-cols-[72px_minmax(180px,1.4fr)_minmax(110px,0.9fr)_minmax(140px,1fr)_minmax(140px,0.9fr)_minmax(120px,0.8fr)_minmax(220px,1.2fr)] items-center gap-x-4 border-x border-b bg-background px-4 py-3 transition-colors duration-200 hover:bg-muted/40"
                   >
                     <div className="relative h-[50px] w-[50px]">
                       {item.images[0]?.thumbnailUrl ? (
@@ -222,7 +223,7 @@ export function VirtualizedItemCollection({
                         </Badge>
                       ))}
                     </div>
-                  </div>
+                  </Link>
                 ) : (
                   <ListPlaceholderRow />
                 )}
@@ -265,41 +266,41 @@ export function VirtualizedItemCollection({
               }
 
               return (
-                <Card
-                  key={item.id}
-                  className="cursor-pointer overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-lg"
-                  onClick={() => onItemClick(item.id, index)}
-                >
-                  <div className="relative aspect-square">
-                    {item.images[0]?.thumbnailUrl ? (
-                      <Image
-                        src={item.images[0].thumbnailUrl}
-                        alt={item.name}
-                        fill
-                        priority={index < 9}
-                        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                        style={{ objectFit: 'cover' }}
-                        className="transition-transform duration-300 hover:scale-110"
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-gray-200 text-gray-400 dark:bg-gray-700">
-                        No image
-                      </div>
-                    )}
-                  </div>
-
-                  <CardContent className="p-4">
-                    <p className="mb-2 text-sm text-gray-500">ID: {item.itemId || 'No ID'}</p>
-                    <p className="mb-2 text-sm font-semibold">{item.name}</p>
-                    <div className="flex flex-wrap gap-2">
-                      {item.tags.map((tag) => (
-                        <Badge key={tag} variant="secondary" className="rounded-full text-xs">
-                          {tag}
-                        </Badge>
-                      ))}
+                <Link key={item.id} href={getItemHref(item.id, index)}>
+                  <Card
+                    className="overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-lg"
+                  >
+                    <div className="relative aspect-square">
+                      {item.images[0]?.thumbnailUrl ? (
+                        <Image
+                          src={item.images[0].thumbnailUrl}
+                          alt={item.name}
+                          fill
+                          priority={index < 9}
+                          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                          style={{ objectFit: 'cover' }}
+                          className="transition-transform duration-300 hover:scale-110"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-gray-200 text-gray-400 dark:bg-gray-700">
+                          No image
+                        </div>
+                      )}
                     </div>
-                  </CardContent>
-                </Card>
+
+                    <CardContent className="p-4">
+                      <p className="mb-2 text-sm text-gray-500">ID: {item.itemId || 'No ID'}</p>
+                      <p className="mb-2 text-sm font-semibold">{item.name}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {item.tags.map((tag) => (
+                          <Badge key={tag} variant="secondary" className="rounded-full text-xs">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
               )
             })}
           </div>

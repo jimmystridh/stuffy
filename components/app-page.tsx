@@ -261,11 +261,11 @@ export function Page() {
     updateUrlParams({ view: viewMode === 'card' ? 'list' : 'card' }, { preserveIndex: true })
   }
 
-  const handleItemClick = (id: string, index: number) => {
+  const getItemHref = (id: string, index: number) => {
     const currentFilters = new URLSearchParams(searchParams.toString())
     currentFilters.set('index', index.toString())
     currentFilters.delete('page')
-    router.push(`/item/${id}?${currentFilters.toString()}`)
+    return `/item/${id}?${currentFilters.toString()}`
   }
 
   const modeConfig = SEARCH_MODE_CONFIG[searchMode]
@@ -444,7 +444,7 @@ export function Page() {
                 itemsByIndex={itemsByIndex}
                 totalItems={totalItems}
                 viewMode={viewMode}
-                onItemClick={handleItemClick}
+                getItemHref={getItemHref}
                 onVisibleRangeChange={loadPagesForRange}
                 restoreIndex={restoreIndex}
                 restoreKey={restoreKey}
