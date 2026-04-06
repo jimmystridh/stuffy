@@ -6,48 +6,38 @@ import { bucket } from './firebase/storage'
 import type { UploadedImageFile } from './types'
 
 const THUMBNAIL_WIDTH = 300
-const MAX_IMAGE_WIDTH = 1280
+const MAX_IMAGE_WIDTH = 1024
+const JPEG_QUALITY = 70
 
 export type SavedFile = UploadedImageFile
 
 export async function saveFile(file: File): Promise<SavedFile> {
-  const fileExtension = file.name.split('.').pop() || 'jpg'
   const uniqueId = crypto.randomBytes(16).toString('hex')
-  const storedFilename = `${uniqueId}.${fileExtension}`
-  const thumbnailFilename = `${uniqueId}_thumb.${fileExtension}`
+  const storedFilename = `${uniqueId}.jpg`
+  const thumbnailFilename = `${uniqueId}_thumb.jpg`
 
   const buffer = Buffer.from(await file.arrayBuffer())
-  const image = sharp(buffer)
-  const metadata = await image.metadata()
 
-  // Process full image
-  let fullBuffer: Buffer
-  if (metadata.width && metadata.width > MAX_IMAGE_WIDTH) {
-    fullBuffer = await image
-      .rotate()
-      .resize(MAX_IMAGE_WIDTH, null, { withoutEnlargement: true, fit: 'inside' })
-      .toBuffer()
-  } else {
-    fullBuffer = await image.rotate().toBuffer()
-  }
+  const fullBuffer = await sharp(buffer)
+    .rotate()
+    .resize(MAX_IMAGE_WIDTH, null, { withoutEnlargement: true, fit: 'inside' })
+    .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })
+    .toBuffer()
 
-  // Process thumbnail
   const thumbBuffer = await sharp(buffer)
     .rotate()
     .resize(THUMBNAIL_WIDTH, null, { withoutEnlargement: true, fit: 'inside' })
+    .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })
     .toBuffer()
 
-  // Upload full image to GCS
   const fullFile = bucket.file(`images/${storedFilename}`)
   await fullFile.save(fullBuffer, {
-    metadata: { contentType: file.type },
+    metadata: { contentType: 'image/jpeg' },
   })
-  // Bucket has uniform access with allUsers:objectViewer, no per-object ACL needed
 
-  // Upload thumbnail to GCS
   const thumbFile = bucket.file(`images/${thumbnailFilename}`)
   await thumbFile.save(thumbBuffer, {
-    metadata: { contentType: file.type },
+    metadata: { contentType: 'image/jpeg' },
   })
 
   const bucketName = process.env.GCS_BUCKET_NAME || 'stuffy-uploads'
@@ -58,8 +48,8 @@ export async function saveFile(file: File): Promise<SavedFile> {
     thumbnailFilename,
     publicUrl: `https://storage.googleapis.com/${bucketName}/images/${storedFilename}`,
     thumbnailUrl: `https://storage.googleapis.com/${bucketName}/images/${thumbnailFilename}`,
-    mimeType: file.type,
-    size: file.size,
+    mimeType: 'image/jpeg',
+    size: fullBuffer.length,
   }
 }
 
@@ -78,36 +68,29 @@ export async function saveFileFromUrl(url: string): Promise<SavedFile> {
 export async function saveFileFromBuffer(
   buffer: Buffer,
   filename: string,
-  mimeType: string
+  _mimeType: string
 ): Promise<SavedFile> {
-  const fileExtension = filename.split('.').pop() || 'jpg'
   const uniqueId = crypto.randomBytes(16).toString('hex')
-  const storedFilename = `${uniqueId}.${fileExtension}`
-  const thumbnailFilename = `${uniqueId}_thumb.${fileExtension}`
+  const storedFilename = `${uniqueId}.jpg`
+  const thumbnailFilename = `${uniqueId}_thumb.jpg`
 
-  const image = sharp(buffer)
-  const metadata = await image.metadata()
-
-  let fullBuffer: Buffer
-  if (metadata.width && metadata.width > MAX_IMAGE_WIDTH) {
-    fullBuffer = await image
-      .rotate()
-      .resize(MAX_IMAGE_WIDTH, null, { withoutEnlargement: true, fit: 'inside' })
-      .toBuffer()
-  } else {
-    fullBuffer = await image.rotate().toBuffer()
-  }
+  const fullBuffer = await sharp(buffer)
+    .rotate()
+    .resize(MAX_IMAGE_WIDTH, null, { withoutEnlargement: true, fit: 'inside' })
+    .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })
+    .toBuffer()
 
   const thumbBuffer = await sharp(buffer)
     .rotate()
     .resize(THUMBNAIL_WIDTH, null, { withoutEnlargement: true, fit: 'inside' })
+    .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })
     .toBuffer()
 
   const fullFile = bucket.file(`images/${storedFilename}`)
-  await fullFile.save(fullBuffer, { metadata: { contentType: mimeType } })
+  await fullFile.save(fullBuffer, { metadata: { contentType: 'image/jpeg' } })
 
   const thumbFile = bucket.file(`images/${thumbnailFilename}`)
-  await thumbFile.save(thumbBuffer, { metadata: { contentType: mimeType } })
+  await thumbFile.save(thumbBuffer, { metadata: { contentType: 'image/jpeg' } })
 
   const bucketName = process.env.GCS_BUCKET_NAME || 'stuffy-uploads'
 
@@ -117,8 +100,8 @@ export async function saveFileFromBuffer(
     thumbnailFilename,
     publicUrl: `https://storage.googleapis.com/${bucketName}/images/${storedFilename}`,
     thumbnailUrl: `https://storage.googleapis.com/${bucketName}/images/${thumbnailFilename}`,
-    mimeType,
-    size: buffer.length,
+    mimeType: 'image/jpeg',
+    size: fullBuffer.length,
   }
 }
 
