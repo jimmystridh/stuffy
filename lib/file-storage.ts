@@ -57,18 +57,16 @@ export async function saveFileFromUrl(url: string): Promise<SavedFile> {
   const response = await fetch(url)
   if (!response.ok) throw new Error(`Failed to fetch image from ${url}: ${response.status}`)
 
-  const contentType = response.headers.get('content-type') || 'image/jpeg'
   const buffer = Buffer.from(await response.arrayBuffer())
   const urlPath = new URL(url).pathname
   const filename = urlPath.split('/').pop() || 'image.jpg'
 
-  return saveFileFromBuffer(buffer, filename, contentType)
+  return saveFileFromBuffer(buffer, filename)
 }
 
 export async function saveFileFromBuffer(
   buffer: Buffer,
   filename: string,
-  _mimeType: string
 ): Promise<SavedFile> {
   const uniqueId = crypto.randomBytes(16).toString('hex')
   const storedFilename = `${uniqueId}.jpg`
