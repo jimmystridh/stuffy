@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Loader2, Sparkles, Trash2 } from 'lucide-react'
-import { getItemByItemId, refreshItemAi, removeItem } from '@/app/actions/items'
+import { getItemById, getItemByItemId, refreshItemAi, removeItem } from '@/app/actions/items'
 import type { Item } from '@/lib/types'
 
 export function Page({ params }: { params: { id: string } }) {
@@ -25,6 +25,12 @@ export function Page({ params }: { params: { id: string } }) {
         const result = await getItemByItemId(params.id)
         if (result.item) {
           setItem(result.item)
+          return
+        }
+
+        const fallbackResult = await getItemById(params.id)
+        if (fallbackResult.item) {
+          setItem(fallbackResult.item)
         }
       } catch {
         console.error('Failed to load item')

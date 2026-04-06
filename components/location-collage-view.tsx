@@ -49,6 +49,11 @@ export function CollageView({ locationId }: CollageViewProps) {
     return result
   }, [items])
 
+  const getItemViewHref = (item: Item) => {
+    const routeId = item.itemId || item.id
+    return `/item/${encodeURIComponent(routeId)}/view`
+  }
+
   if (status === 'loading') {
     return (
       <div className="container mx-auto p-4">
@@ -116,7 +121,7 @@ export function CollageView({ locationId }: CollageViewProps) {
           }}
         >
           {allImages.map(({ image, item }) => (
-            <Link key={image.id} href={`/item/${item.id}/view`}>
+            <Link key={image.id} href={getItemViewHref(item)}>
               <div className="relative aspect-square overflow-hidden">
                 <Image
                   src={image.thumbnailUrl}
