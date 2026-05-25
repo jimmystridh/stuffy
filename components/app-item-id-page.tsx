@@ -53,12 +53,14 @@ export function Page({ params }: { params: { id: string } }) {
 
   useEffect(() => {
     const loadData = async () => {
-      if (isNewItem) {
-        setIsLoading(false)
-        return
-      }
-
       try {
+        const locationsResult = await getLocations()
+        if (locationsResult.locations) {
+          setLocations(locationsResult.locations)
+        }
+
+        if (isNewItem) return
+
         const result = await getItemById(params.id)
         if (result.error || !result.item) {
           console.error(result.error)
@@ -103,16 +105,6 @@ export function Page({ params }: { params: { id: string } }) {
     }
     loadData()
   }, [params.id, searchParams, isNewItem, setItem])
-
-  useEffect(() => {
-    const loadLocations = async () => {
-      const result = await getLocations()
-      if (result.locations) {
-        setLocations(result.locations)
-      }
-    }
-    loadLocations()
-  }, [])
 
   const handleRefreshAi = async () => {
     if (isNewItem) return
