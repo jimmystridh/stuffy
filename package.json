@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test",
+    "test": "tsx --test lib/google-cloud-auth.test.ts",
     "ai:backfill": "tsx scripts/backfill-item-ai.ts",
     "backup:drive": "tsx scripts/run-drive-backup.ts"
   },
