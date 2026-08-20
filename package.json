@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "tsx --test",
     "ai:backfill": "tsx scripts/backfill-item-ai.ts",
     "backup:drive": "tsx scripts/run-drive-backup.ts"
   },

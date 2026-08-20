@@ -9,6 +9,8 @@ env:
   REGION: europe-north1
   SERVICE_NAME: stuffy
   GAR_LOCATION: europe-north1-docker.pkg.dev
+  RUNTIME_SERVICE_ACCOUNT: stuffy-runtime@priv-lab.iam.gserviceaccount.com
+  DEPLOY_SERVICE_ACCOUNT: stuffy-deployer@priv-lab.iam.gserviceaccount.com
   BACKUP_SCHEDULER_JOB_NAME: stuffy-daily-drive-backup
   BACKUP_SCHEDULER_LOCATION: europe-west1
   BACKUP_SCHEDULER_SCHEDULE: '17 2 * * *'
@@ -29,7 +31,7 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -63,9 +65,10 @@ jobs:
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars "FIREBASE_ADMIN_PROJECT_ID=${{ secrets.FIREBASE_ADMIN_PROJECT_ID }}" \
-            --set-env-vars "FIREBASE_ADMIN_CLIENT_EMAIL=${{ secrets.FIREBASE_ADMIN_CLIENT_EMAIL }}" \
-            --set-env-vars "FIREBASE_ADMIN_PRIVATE_KEY=${{ secrets.FIREBASE_ADMIN_PRIVATE_KEY }}" \
+            --service-account "${{ env.RUNTIME_SERVICE_ACCOUNT }}" \
+            --set-env-vars "GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }}" \
+            --set-env-vars "FIREBASE_ADMIN_PROJECT_ID=${{ env.PROJECT_ID }}" \
+            --set-env-vars "GOOGLE_VERTEX_PROJECT=${{ env.PROJECT_ID }}" \
             --set-env-vars "GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}" \
             --set-env-vars "ALLOWED_EMAILS=${{ secrets.ALLOWED_EMAILS }}" \
             --set-env-vars "NODE_ENV=production" \

@@ -1,6 +1,16 @@
-import { initializeApp, getApps, cert, type ServiceAccount, type App } from 'firebase-admin/app'
+import {
+  applicationDefault,
+  cert,
+  getApps,
+  initializeApp,
+  type App,
+} from 'firebase-admin/app'
 import { getFirestore, type Firestore } from 'firebase-admin/firestore'
 import { getAuth, type Auth } from 'firebase-admin/auth'
+import {
+  getFirebaseAdminCredentials,
+  getGoogleCloudProject,
+} from '@/lib/google-cloud-auth'
 
 let _app: App | undefined
 let _db: Firestore | undefined
@@ -13,13 +23,25 @@ function getAdminApp(): App {
     return _app
   }
 
-  const serviceAccount: ServiceAccount = {
-    projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+  const projectId = getGoogleCloudProject()
+  const credentials = getFirebaseAdminCredentials()
+
+  if (credentials && !projectId) {
+    throw new Error(
+      'FIREBASE_ADMIN_PROJECT_ID or GOOGLE_CLOUD_PROJECT is required with inline Firebase Admin credentials',
+    )
   }
 
-  _app = initializeApp({ credential: cert(serviceAccount) })
+  _app = initializeApp({
+    credential: credentials
+      ? cert({
+          projectId,
+          clientEmail: credentials.client_email,
+          privateKey: credentials.private_key,
+        })
+      : applicationDefault(),
+    ...(projectId && { projectId }),
+  })
   return _app
 }
 

@@ -5,37 +5,21 @@
  *   npx tsx scripts/migrate.ts
  *
  * Requires:
- *   - .env.local with Firebase Admin + GCS credentials
+ *   - Application Default Credentials or local credentials in .env.local
  *   - ../stuff-tracker/stufftracker_backup.sql
  *   - ../stuff-tracker/uploads/ directory with image files
  */
 
 import * as fs from 'fs'
 import * as path from 'path'
-import { initializeApp, cert, type ServiceAccount } from 'firebase-admin/app'
-import { getFirestore } from 'firebase-admin/firestore'
-import { Storage } from '@google-cloud/storage'
 import * as dotenv from 'dotenv'
+import { adminDb } from '@/lib/firebase/admin'
+import { bucket } from '@/lib/firebase/storage'
 
 dotenv.config({ path: path.resolve(__dirname, '../.env.local') })
 
-const serviceAccount: ServiceAccount = {
-  projectId: process.env.FIREBASE_ADMIN_PROJECT_ID!,
-  clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL!,
-  privateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY!.replace(/\\n/g, '\n'),
-}
-
-const app = initializeApp({ credential: cert(serviceAccount) })
-const db = getFirestore(app)
-const storage = new Storage({
-  projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
-  credentials: {
-    client_email: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
-    private_key: process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-  },
-})
+const db = adminDb
 const bucketName = process.env.GCS_BUCKET_NAME || 'stuffy-uploads'
-const bucket = storage.bucket(bucketName)
 
 const SQL_FILE = path.resolve(__dirname, '../../stuff-tracker/stufftracker_backup.sql')
 const UPLOADS_DIR = path.resolve(__dirname, '../../stuff-tracker/uploads')

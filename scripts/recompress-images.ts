@@ -1,31 +1,13 @@
 import 'dotenv/config'
 import sharp from 'sharp'
-import { initializeApp, cert, type ServiceAccount } from 'firebase-admin/app'
-import { getFirestore } from 'firebase-admin/firestore'
-import { Storage } from '@google-cloud/storage'
+import { adminDb } from '@/lib/firebase/admin'
+import { bucket } from '@/lib/firebase/storage'
 
 const MAX_WIDTH = 1024
 const THUMB_WIDTH = 300
 const JPEG_QUALITY = 70
-const BUCKET_NAME = process.env.GCS_BUCKET_NAME || 'stuffy-uploads'
 const CONCURRENCY = 5
-
-const serviceAccount: ServiceAccount = {
-  projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
-  clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
-  privateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-}
-
-const app = initializeApp({ credential: cert(serviceAccount) })
-const db = getFirestore(app)
-const storage = new Storage({
-  projectId: serviceAccount.projectId as string,
-  credentials: {
-    client_email: serviceAccount.clientEmail as string,
-    private_key: serviceAccount.privateKey as string,
-  },
-})
-const bucket = storage.bucket(BUCKET_NAME)
+const db = adminDb
 
 interface ImageRecord {
   storedFilename: string

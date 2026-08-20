@@ -1,18 +1,10 @@
-import { initializeApp, cert } from 'firebase-admin/app'
-import { getFirestore } from 'firebase-admin/firestore'
 import * as dotenv from 'dotenv'
 import * as path from 'path'
+import { adminDb } from '@/lib/firebase/admin'
 
 dotenv.config({ path: path.resolve(__dirname, '../.env.local') })
 
-const app = initializeApp({
-  credential: cert({
-    projectId: process.env.FIREBASE_ADMIN_PROJECT_ID!,
-    clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL!,
-    privateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY!.replace(/\\n/g, '\n'),
-  })
-})
-const db = getFirestore(app)
+const db = adminDb
 
 async function deleteCollection(name: string) {
   const snap = await db.collection(name).get()

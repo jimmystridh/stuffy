@@ -1,16 +1,20 @@
 import { Storage, type Bucket } from '@google-cloud/storage'
+import {
+  getFirebaseAdminCredentials,
+  getGoogleCloudProject,
+} from '@/lib/google-cloud-auth'
 
 let _storage: Storage | undefined
 let _bucket: Bucket | undefined
 
 function getStorage(): Storage {
   if (!_storage) {
+    const credentials = getFirebaseAdminCredentials()
+    const projectId = getGoogleCloudProject()
+
     _storage = new Storage({
-      projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
-      credentials: {
-        client_email: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
-        private_key: process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-      },
+      ...(projectId && { projectId }),
+      ...(credentials && { credentials }),
     })
   }
   return _storage
